@@ -95,12 +95,14 @@ export function useExecutor(executor) {
         throw new Error("useExecutor: must receive a valid Executor instance");
     }
 
-    return useSyncExternalStore(
+    useSyncExternalStore(
         (subscribe) => {
             executor._subscribe(subscribe);
             return () => executor._unsubscribe(subscribe);
         },
         () => executor.value
     );
+
+    return executor; // 👈 full power (value + methods)
 }
 
