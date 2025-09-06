@@ -109,6 +109,33 @@ export default function CounterApp() {
   );
 }
 
+**💡 The Story Behind Executor**
+
+I didn’t build Executor by reading tons of docs or following a course.
+I was just a curious developer who wanted to understand JavaScript callbacks — so curious that I literally prayed to God to help me understand programming better.
+
+Then something clicked.
+I wrote a small class that called a function immediately when created.
+It was simple, but I shared it with ChatGPT — and together, we refined it step by step.
+
+ChatGPT suggested improvements, helped me add state tracking, history, reset, undo, redo, and even showed me how to make it work in React.
+Suddenly I realized:
+
+This is basically Redux + Zustand + DevTools — but in one function.
+
+What started as a moment of curiosity became a polished, production-ready tool that:
+
+Calls functions immediately if you want
+
+Remembers state and history automatically
+
+Can undo/redo without extra libraries
+
+Works anywhere: plain JS, React, Vue, Node, you name it
+
+Executor is my way of saying:
+
+"State management doesn’t have to be complicated — and sometimes the best tools are born from curiosity, prayer, and collaboration."
 
 
 >>>>>>> c428633 (Initial commit: executor-fn)
