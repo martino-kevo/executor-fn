@@ -33,6 +33,7 @@ function DebugPanel({ store }) {
 
 // --- UserComponent.jsx ---
 export default function UserComponent() {
+    // Hook will auto re-render when userStore updates
     const user = useExecutor(userStore);
 
     useEffect(() => {
