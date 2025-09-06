@@ -81,5 +81,34 @@ Here’s a full-featured React app using `Executor` as a global store
 
 > 🎮 **Try executor-fn live in your browser!**
 
+## 🔥 React Hook Support (`useExecutor`)
+
+You can now bind an `Executor` instance directly to your React components without manually forcing re-renders.
+
+```jsx
+import React from "react";
+import Executor, { useExecutor } from "executor-fn";
+
+const counterStore = Executor((count, delta) => count + delta, {
+  storeHistory: true,
+  callNow: true,
+  initialArgs: [0],
+});
+
+export default function CounterApp() {
+  const count = useExecutor(counterStore); // Auto-updates on state change
+
+  return (
+    <div>
+      <h2>Count: {count}</h2>
+      <button onClick={() => counterStore(counterStore.value, 1)}>➕</button>
+      <button onClick={() => counterStore(counterStore.value, -1)}>➖</button>
+      <button onClick={counterStore.undo}>⏪ Undo</button>
+      <button onClick={counterStore.redo}>⏩ Redo</button>
+    </div>
+  );
+}
+
+
 
 >>>>>>> c428633 (Initial commit: executor-fn)

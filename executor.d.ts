@@ -1,21 +1,22 @@
-declare type ExecutorOptions = {
-    storeHistory?: boolean
-    initialArgs?: any[]
-    callNow?: boolean
-}
+export default function Executor<T>(
+    callback: (...args: any[]) => T,
+    options?: {
+        storeHistory?: boolean;
+        initialArgs?: any[];
+        callNow?: boolean;
+    }
+): ((...args: any[]) => T) & {
+    value: T;
+    initialValue: T;
+    history?: T[];
+    redoStack?: T[];
+    log(): void;
+    reset(): T;
+    undo(): T;
+    redo(): T;
+    _subscribe(cb: () => void): void;
+    _unsubscribe(cb: () => void): void;
+};
 
-declare type ExecutorFunction<T extends (...args: any[]) => any> = {
-    (...args: Parameters<T>): ReturnType<T>
-    value: ReturnType<T> | undefined
-    initialValue: ReturnType<T> | undefined
-    history?: ReturnType<T>[]
-    log: () => void
-    reset: () => ReturnType<T> | undefined
-    undo: () => ReturnType<T> | undefined
-    redo: () => ReturnType<T> | undefined
-}
+export function useExecutor<T>(executor: any): T;
 
-export default function Executor<T extends (...args: any[]) => any>(
-    callback: T,
-    options?: ExecutorOptions
-): ExecutorFunction<T>

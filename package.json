@@ -5,6 +5,12 @@
     "main": "executor.js",
     "types": "executor.d.ts",
     "type": "module",
+    "exports": {
+        ".": {
+            "import": "./executor.js",
+            "types": "./executor.d.ts"
+        }
+    },
     "keywords": [
         "executor",
         "function-wrapper",
@@ -12,12 +18,23 @@
         "redo",
         "history",
         "state",
-        "utility"
+        "utility",
+        "react",
+        "zustand",
+        "redux-alternative"
     ],
     "author": "Your Name",
     "license": "MIT",
     "repository": {
         "type": "git",
         "url": "git+https://github.com/martino-kevo/executor-fn.git"
+    },
+    "peerDependencies": {
+        "react": ">=17.0.0"
+    },
+    "peerDependenciesMeta": {
+        "react": {
+            "optional": true
+        }
     }
 }
