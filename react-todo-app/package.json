@@ -1,0 +1,15 @@
+{
+  "name": "executor-fn-todo-example",
+  "private": true,
+  "scripts": {
+    "dev": "vite"
+  },
+  "dependencies": {
+    "react": "^18.0.0",
+    "react-dom": "^18.0.0",
+    "executor-fn": "latest"
+  },
+  "devDependencies": {
+    "vite": "^5.0.0"
+  }
+}

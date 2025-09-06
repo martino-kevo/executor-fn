@@ -62,6 +62,24 @@ export default function TextEditorApp() {
   );
 }
 
-📄 Full example: examples/text-editor.jsx
+📄 **Full example: examples/text-editor.jsx**
+
+## React Todo App Example
+
+Here’s a full-featured React app using `Executor` as a global store
+(with undo/redo support out-of-the-box):
+
+- Multiple components share the same `todosStore`.
+- Undo/Redo history is automatic — no boilerplate!
+- No Redux, no Zustand — just one function.
+
+📂 **See full code in [`examples/react-todo-app`](./examples/react-todo-app)**
+
+---
+
+[![Open in CodeSandbox](https://codesandbox.io/static/img/play-codesandbox.svg)](https://codesandbox.io/s/github/martino-kevo/executor-fn/tree/main/demo)
+
+> 🎮 **Try executor-fn live in your browser!**
+
 
 >>>>>>> c428633 (Initial commit: executor-fn)
