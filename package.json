@@ -1,6 +1,6 @@
 {
     "name": "executor-fn",
-    "version": "1.0.1",
+    "version": "1.0.2",
     "description": "A lightweight function wrapper with optional state, history, undo/redo, and reset support. Use like a normal function or unlock powerful time-travel features.",
     "main": "executor.js",
     "types": "executor.d.ts",
