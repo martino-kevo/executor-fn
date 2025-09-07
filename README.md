@@ -1,6 +1,19 @@
 <<<<<<< HEAD
 # executor-fn
 =======
+# Executor – The Function Bender
+“If you wield this, then you are a Function Bender — You bend Functions at your will 😎”
+
+Bend state updates like clay.
+
+Undo/redo history at your fingertips.
+
+Jump, batch, pause, resume, serialize — all with simple functions.
+
+Async? No problem. Metadata? Already there.
+
+“Once you master Executor, React, Node, or any JS framework becomes your playground.”
+
 # 🚀 executor-fn
 
 A tiny, powerful utility for wrapping any function with **immediate execution**,  
