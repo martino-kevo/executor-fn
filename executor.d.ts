@@ -14,9 +14,13 @@ export default function Executor<T>(
     reset(): T;
     undo(): T;
     redo(): T;
+    jumpTo(index: number): T | undefined;
+    replaceAt(index: number, newValue: T): T | undefined;
+    insertAt(index: number, newValue: T): T | undefined;
     _subscribe(cb: () => void): void;
     _unsubscribe(cb: () => void): void;
 };
 
 export function useExecutor<T>(executor: any): T;
+
 

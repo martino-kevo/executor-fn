@@ -83,6 +83,48 @@ export default function Executor(callback, options = {}) {
         return fn.value;
     };
 
+    // ✅ NEW: jump directly to a snapshot
+    fn.jumpTo = (index) => {
+        if (!storeHistory) {
+            throw new Error("Executor: jumpTo requires storeHistory = true");
+        }
+        if (index < 0 || index >= history.length) {
+            console.warn("Executor: jumpTo index out of range:", index);
+            return fn.value;
+        }
+        fn.value = history[index];
+        notifySubscribers();
+        return fn.value;
+    };
+
+    // ✅ NEW: replace a history entry with a new value
+    fn.replaceAt = (index, newValue) => {
+        if (!storeHistory) {
+            throw new Error("Executor: replaceAt requires storeHistory = true");
+        }
+        if (index < 0 || index >= history.length) {
+            console.warn("Executor: replaceAt index out of range:", index);
+            return fn.value;
+        }
+        history[index] = newValue;
+        // If we're currently viewing that snapshot, update .value too
+        if (fn.value === history[index] || index === history.length - 1) {
+            fn.value = newValue;
+            notifySubscribers();
+        }
+        return fn.value;
+    };
+
+    // ✅ Insert new snapshot at a given position
+    fn.insertAt = (index, newValue) => {
+        if (storeHistory && index >= 0 && index <= history.length) {
+            history.splice(index, 0, newValue);
+            fn.value = newValue;
+            notifySubscribers();
+        }
+        return fn.value;
+    };
+
     fn._subscribe = (cb) => subscribers.add(cb);
     fn._unsubscribe = (cb) => subscribers.delete(cb);
 
