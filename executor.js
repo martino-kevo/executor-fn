@@ -15,50 +15,60 @@ export default function Executor(callback, options = {}) {
         throw new Error("Executor: callback must be a function");
     }
 
+    // Default options
     const {
         storeHistory = false,
         initialArgs = [],
         callNow = false,
-        metadataFn, // optional function to attach metadata to snapshots
+        metadataFn, // custom metadata for each history entry
+        maxHistory = Infinity, // 🆕 limits number of stored entries
+        equalityFn, // 🆕 skip adding duplicates
+        onError // 🆕 handle errors gracefully
     } = options;
-
-    if (callNow && typeof callback !== "function") {
-        console.warn(
-            "Executor: callNow was set to true, but no valid callback was provided."
-        );
-    }
 
     const history = storeHistory ? [] : null;
     const redoStack = storeHistory ? [] : null;
     const subscribers = new Set();
     let historyPaused = false;
 
-    // Initialize the initial value if callNow is true
     let initialValue;
-    if (callNow) {
-        initialValue = callback(...initialArgs);
-        // Handle async initial value
-        if (storeHistory) history.push({ value: deepClone(initialValue), meta: metadataFn?.(initialValue) });
+    try {
+        if (callNow) {
+            initialValue = callback(...initialArgs);
+            if (storeHistory) history.push({ value: deepClone(initialValue), meta: metadataFn?.(initialValue) });
+        }
+    } catch (err) {
+        if (onError) onError(err);
+        else throw err;
     }
 
     const notifySubscribers = () => subscribers.forEach(cb => cb());
 
+    // Push to history with checks
+    const pushToHistory = (result) => {
+        if (!storeHistory || historyPaused) return;
+        if (equalityFn && history.length > 0) {
+            const last = history[history.length - 1].value;
+            if (equalityFn(result, last)) return; // skip duplicate
+        }
+        history.push({ value: deepClone(result), meta: metadataFn?.(result) });
+        if (history.length > maxHistory) history.shift(); // enforce max size
+        redoStack.length = 0;
+    };
+
     // The main executor function
     const fn = async (...args) => {
-        let result = callback(...args);
-        if (result instanceof Promise) {
-            result = await result;
+        try {
+            let result = callback(...args);
+            if (result instanceof Promise) result = await result;
+            fn.value = result;
+            pushToHistory(result);
+            notifySubscribers();
+            return result;
+        } catch (err) {
+            if (onError) onError(err);
+            else throw err;
         }
-        fn.value = result;
-
-        if (storeHistory && !historyPaused) {
-            const entry = { value: deepClone(result), meta: metadataFn?.(result) };
-            history.push(entry);
-            redoStack.length = 0;
-        }
-
-        notifySubscribers();
-        return result;
     };
 
     fn.value = initialValue;
@@ -66,10 +76,9 @@ export default function Executor(callback, options = {}) {
     fn.history = history;
     fn.redoStack = redoStack;
 
-    // Simple logger for debugging
     fn.log = () => console.log(fn.value);
 
-    // Reset to initial value and clear history
+    // Reset to initial value
     fn.reset = () => {
         fn.value = fn.initialValue;
         if (storeHistory) {
@@ -81,19 +90,17 @@ export default function Executor(callback, options = {}) {
         return fn.value;
     };
 
-    // Undo presents the value before the last call
+    // Undo last change
     fn.undo = (steps = 1) => {
         if (storeHistory && history.length > 1) {
-            for (let i = 0; i < steps && history.length > 1; i++) {
-                redoStack.push(history.pop());
-            }
+            for (let i = 0; i < steps && history.length > 1; i++) redoStack.push(history.pop());
             fn.value = history[history.length - 1].value;
             notifySubscribers();
         }
         return fn.value;
     };
 
-    // Redo re-applies the last undone value
+    // Redo last undone change
     fn.redo = (steps = 1) => {
         if (storeHistory && redoStack.length > 0) {
             for (let i = 0; i < steps && redoStack.length > 0; i++) {
@@ -106,17 +113,17 @@ export default function Executor(callback, options = {}) {
         return fn.value;
     };
 
-    // Removes the history entry at the specified index
+    // Remove specific history entry
     fn.removeAt = (index) => {
         if (storeHistory && index >= 0 && index < history.length) {
             history.splice(index, 1);
-            fn.value = history[history.length - 1].value;
+            fn.value = history[history.length - 1]?.value ?? fn.initialValue;
             notifySubscribers();
         }
         return fn.value;
     };
 
-    // Jumps to a specific history entry without altering history stacks
+    // Jump to specific history entry
     fn.jumpTo = (index) => {
         if (!storeHistory) throw new Error("Executor: jumpTo requires storeHistory = true");
         if (index < 0 || index >= history.length) return fn.value;
@@ -125,17 +132,17 @@ export default function Executor(callback, options = {}) {
         return fn.value;
     };
 
-    // Replaces the history entry at the specified index with a new value
+    // Replace specific history entry
     fn.replaceAt = (index, newValue) => {
         if (!storeHistory) throw new Error("Executor: replaceAt requires storeHistory = true");
         if (index < 0 || index >= history.length) return fn.value;
         history[index] = { value: deepClone(newValue), meta: metadataFn?.(newValue) };
-        if (fn.value === history[index].value || index === history.length - 1) fn.value = newValue;
+        if (index === history.length - 1) fn.value = newValue;
         notifySubscribers();
         return fn.value;
     };
 
-    // Inserts a new history entry at the specified index
+    // Insert new history entry at specific position
     fn.insertAt = (index, newValue) => {
         if (storeHistory && index >= 0 && index <= history.length) {
             history.splice(index, 0, { value: deepClone(newValue), meta: metadataFn?.(newValue) });
@@ -145,7 +152,7 @@ export default function Executor(callback, options = {}) {
         return fn.value;
     };
 
-    // Clears the entire history and resets to current value
+    // Clear entire history and reset to current value
     fn.clearHistory = () => {
         if (storeHistory) {
             history.length = 0;
@@ -168,14 +175,13 @@ export default function Executor(callback, options = {}) {
         }
     };
 
-    // Batch multiple calls into a single history entry
+    // Batch multiple calls into one history entry
     fn.batch = (callback) => {
         if (!storeHistory) return callback();
         historyPaused = true;
         const result = callback();
         historyPaused = false;
-        history.push({ value: deepClone(fn.value), meta: metadataFn?.(fn.value) });
-        redoStack.length = 0;
+        pushToHistory(fn.value);
         notifySubscribers();
         return result;
     };
@@ -184,7 +190,7 @@ export default function Executor(callback, options = {}) {
     fn.pauseHistory = () => { historyPaused = true; };
     fn.resumeHistory = () => { historyPaused = false; };
 
-    // Subscription management for React integration
+    // Subscription management
     fn._subscribe = (cb) => subscribers.add(cb);
     fn._unsubscribe = (cb) => subscribers.delete(cb);
 
@@ -217,11 +223,8 @@ export function useExecutor(executor) {
 // Later we can add a way to filter or transform history entries on the fly
 // Later we can add a way to visualize history for better UX
 // Later we can add a way to export/import history for sharing or backup
-// Later we can add a way to customize equality checks for history entries
 // Later we can add a way to debounce or throttle executor calls
 // Later we can add a way to log history changes for auditing
-// Later we can add a way to handle errors in the callback gracefully
-// Later we can add a way to extend Executor with custom methods or properties
 // Later we can add a way to combine multiple executors into one
 // Later we can add a way to snapshot the entire state of multiple executors
 // Later we can add a way to persist history in localStorage or IndexedDB

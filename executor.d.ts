@@ -2,7 +2,10 @@ export type ExecutorOptions<T> = {
     storeHistory?: boolean;
     initialArgs?: any[];
     callNow?: boolean;
-    metadataFn?: (value: T) => any; // optional metadata for history entries
+    metadataFn?: (value: T) => any; // attach metadata to history entries
+    maxHistory?: number; // limit history size
+    equalityFn?: (a: T, b: T) => boolean; // skip duplicate entries
+    onError?: (error: unknown) => void; // gracefully handle errors
 };
 
 export type HistoryEntry<T> = {
@@ -10,10 +13,8 @@ export type HistoryEntry<T> = {
     meta?: any;
 };
 
-export default function Executor<T>(
-    callback: (...args: any[]) => T | Promise<T>,
-    options?: ExecutorOptions<T>
-): ((...args: any[]) => Promise<T>) & {
+// The full return type of Executor
+export type ExecutorInstance<T> = ((...args: any[]) => Promise<T>) & {
     value: T;
     initialValue: T;
     history?: HistoryEntry<T>[];
@@ -36,5 +37,12 @@ export default function Executor<T>(
     _unsubscribe(cb: () => void): void;
 };
 
-export function useExecutor<T>(executor: any): T;
+export default function Executor<T>(
+    callback: (...args: any[]) => T | Promise<T>,
+    options?: ExecutorOptions<T>
+): ExecutorInstance<T>;
+
+// React hook integration for subscriptions
+export function useExecutor<T>(executor: ExecutorInstance<T>): T;
+
 // Note: This is a simplified type definition. The actual implementation may have more details.
