@@ -49,7 +49,7 @@ function LayoutSwitcher() {
           marginBottom: "1rem",
         }}
       >
-        {ui}
+        {ui.value}
       </div>
 
       <div style={{ display: "flex", gap: "0.5rem", justifyContent: "center" }}>

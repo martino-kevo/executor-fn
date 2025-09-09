@@ -9,11 +9,11 @@ const counter = Executor(x => x + 1, {
     initialArgs: [0]
 });
 
-counter(); // 1
-counter(); // 2
-counter(); // 3
+// Caution: This, counter(); might return NaN or undefined
+counter(counter.value); // 2
+counter(counter.value); // 3
 
-console.log(counter.history); // [0, 1, 2, 3]
+console.log(counter.history); // [1, 2, 3]
 counter.undo(); // back to 2
 counter.redo(); // forward to 3
 
@@ -46,7 +46,7 @@ try {
 const double = Executor(x => x * 2, { callNow: true, initialArgs: [2] });
 const triple = Executor(x => x * 3);
 
-console.log(triple(double.value)); // 12 (3 * 4)
+console.log(triple(double.value)); // 12 (4 * 3)
 
 
 // This makes data pipelines very readable.
@@ -82,3 +82,14 @@ console.log(score.value); // 15 (redo works)
 // This is a cool idea: you could inspect history[n] to see what your 
 // function output was at any previous point in time — something you 
 // cannot do with a plain function.
+
+// Always having the latest value in .value is handy.
+
+// This could be used in simulations, data analysis, or any scenario 
+// where you want to track changes over time.
+
+// Also always add question marks for safe checks
+// eg: game.history?.forEach
+// user.history?.map
+// game.value?.score
+// game.value?.player?.name

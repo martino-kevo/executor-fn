@@ -41,3 +41,26 @@ greet.log() // Logs: "Hello, Guest!"
 // 5️⃣ Straight Calling
 Executor(() => console.log("Straight call executed!"), { callNow: true })
 
+
+/*
+Take caution 😬 if you're doing:
+
+const myGreet = greet("Ada")
+myGreet.log() OR console.log(myGreet) 
+
+👉 Test code properly
+
+Also myGreet.value OR myGreet.[anything] would return undefined.
+
+Just call greet("Kelvin") and...
+greet.value = Updated value (in this case Kelvin) ✅
+
+And greet.[anything] Would work 😎
+
+See advanced.js and advanced2.js and other examples 
+and you will start bending functions to your will 
+in no time.
+
+Also, Don't be scared. Executor, a function wrapper which does state management 
+and time manipulation / time travel is super easy to learn.
+*/

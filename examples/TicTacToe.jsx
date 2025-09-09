@@ -41,8 +41,8 @@ export default function App() {
     const [importText, setImportText] = useState("");
 
     const handleMove = (index) => {
-        game(board, index, player);
-        score(playerScore, 1);
+        game(board.value, index, player);
+        score(playerScore.value, 1);
         setPlayer(player === "X" ? "O" : "X");
     };
 
@@ -70,7 +70,7 @@ export default function App() {
             </div>
 
             <h2>Score</h2>
-            <p>Player Score: {playerScore}</p>
+            <p>Player Score: {playerScore.value}</p>
 
             <div style={{ marginTop: 20 }}>
                 <button onClick={() => group.undo()}>Undo (Both)</button>

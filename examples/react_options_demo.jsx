@@ -23,14 +23,14 @@ export default function App() {
     []
   );
 
-  const value = useExecutor(counter);
+  const count = useExecutor(counter);
 
   return (
     <div style={styles.container}>
       <h1>⚡ Executor Demo</h1>
 
       <p>
-        Current Value: <strong>{value}</strong>
+        Current Value: <strong>{count.value}</strong>
       </p>
 
       <div style={styles.buttonRow}>

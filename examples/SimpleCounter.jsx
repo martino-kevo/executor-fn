@@ -17,7 +17,7 @@ export default function CounterDemo() {
     return (
         <div style={{ padding: 20, fontFamily: "sans-serif" }}>
             <h1>Counter Demo ⚡</h1>
-            <p>Count: {count}</p>
+            <p>Count: {count.value}</p>
 
             <button onClick={() => counter(count, 1)}>+1</button>
             <button onClick={() => counter(count, -1)}>-1</button>

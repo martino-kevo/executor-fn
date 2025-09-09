@@ -68,7 +68,7 @@ export default function ExecutorFullDemo() {
         <div style={{ padding: "2rem", fontFamily: "sans-serif" }}>
             <h1>Executor Full Demo</h1>
             <h2>
-                Current Value: {current} {loading && "⏳"}
+                Current Value: {current.value} {loading && "⏳"}
             </h2>
 
             <div style={{ display: "flex", gap: "0.5rem", marginBottom: "1rem" }}>
