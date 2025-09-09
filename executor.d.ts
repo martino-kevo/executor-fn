@@ -46,7 +46,7 @@ export type ExecutorInstance<T> = ((...args: any[]) => Promise<T>) & {
 };
 
 // Main Executor function
-export default function Executor<T>(
+export function Executor<T>(
     callback: (...args: any[]) => T | Promise<T>,
     options?: ExecutorOptions<T>
 ): ExecutorInstance<T>;
@@ -63,8 +63,8 @@ export type ExecutorGroup = {
     import(dataArr: string[]): void;
 };
 
-export declare namespace Executor {
-    function combine<T>(...executors: ExecutorInstance<T>[]): ExecutorGroup;
+export namespace Executor {
+    export function combine<T>(...executors: ExecutorInstance<T>[]): ExecutorGroup;
 }
 
 
