@@ -22,7 +22,8 @@ export default function Executor(callback, options = {}) {
         callNow = false,
         metadataFn,           // custom metadata for each history entry
         maxHistory = Infinity,// limit number of stored entries
-        equalityFn,           // skip adding duplicates
+        noDuplicate = false, // 🆕 prevent duplicates in history
+        equalityFn,           // skip adding follow-up duplicates
         onError,              // handle errors gracefully
         historyStep = 1,      // 🆕 only record every Nth snapshot
         groupBy               // 🆕 group history entries (e.g. "move", "attack")
@@ -53,26 +54,41 @@ export default function Executor(callback, options = {}) {
 
     const notifySubscribers = () => subscribers.forEach(cb => cb());
 
-    // Push to history with checks
+    let entryCounter = 0; // monotonic index
+
     const pushToHistory = (result) => {
         if (!storeHistory || historyPaused) return;
 
-        // throttle with historyStep
+        // 🔍 noDuplicate checks
+        if (noDuplicate && equalityFn) {
+            if (history.some(h => equalityFn(h.value, result))) return;
+        } else if (noDuplicate) {
+            if (history.some(h => JSON.stringify(h.value) === JSON.stringify(result))) return;
+        }
+
+        // 🔍 throttle
         stepCounter++;
         if (stepCounter % historyStep !== 0) return;
 
+        // 🔍 skip consecutive duplicates
         if (equalityFn && history.length > 0) {
             const last = history[history.length - 1].value;
             if (equalityFn(result, last)) return;
         }
+
+        // ✅ push with metadata + timestamp
         history.push({
             value: deepClone(result),
             meta: metadataFn?.(result),
-            group: groupBy?.(result)
+            group: groupBy?.(result),
+            _index: entryCounter++,    // new insertion index
+            _time: Date.now()          // new timestamp
         });
+
         if (history.length > maxHistory) history.shift();
         redoStack.length = 0;
     };
+
 
     // The main executor function
     const fn = async (...args) => {
@@ -197,6 +213,166 @@ export default function Executor(callback, options = {}) {
         return fn.value;
     };
 
+    // Copy one or more history entries and replace current history
+    fn.copy = (histories) => {
+        if (!storeHistory) return fn.value;
+
+        // Normalize to array of histories
+        const allHistories = Array.isArray(histories[0]) ? histories : [histories];
+
+        // Flatten + deep clone with duplicate checks
+        const copied = [];
+        allHistories.forEach(h => {
+            if (Array.isArray(h)) {
+                h.forEach(entry => {
+                    const val = entry.value;
+
+                    // noDuplicate + equalityFn
+                    if (noDuplicate && equalityFn) {
+                        if (copied.some(e => equalityFn(e.value, val))) return;
+                    } else if (noDuplicate) {
+                        if (copied.some(e => JSON.stringify(e.value) === JSON.stringify(val))) return;
+                    }
+
+                    copied.push({
+                        value: deepClone(val),
+                        meta: entry.meta,
+                        group: entry.group
+                    });
+                });
+            }
+        });
+
+        // Full replace
+        history.length = 0;
+        history.push(...copied);
+
+        // Trim to maxHistory
+        if (history.length > maxHistory) {
+            history.splice(0, history.length - maxHistory);
+        }
+
+        // Reset redoStack
+        redoStack.length = 0;
+
+        // Update fn.value
+        fn.value = history[history.length - 1]?.value ?? fn.initialValue;
+
+        notifySubscribers();
+        return fn.value;
+    };
+
+
+    // Merge one or more history entries into current history
+    fn.merge = (histories, { position = "end" } = {}) => {
+        if (!storeHistory) return fn.value;
+
+        // Normalize to array of histories
+        const allHistories = Array.isArray(histories[0]) ? histories : [histories];
+
+        // Flatten and deep clone with duplicate checks
+        const merged = [];
+        allHistories.forEach(h => {
+            if (Array.isArray(h)) {
+                h.forEach(entry => {
+                    const val = entry.value;
+
+                    // noDuplicate + equalityFn
+                    if (noDuplicate && equalityFn) {
+                        if (history.some(e => equalityFn(e.value, val))) return;
+                        if (merged.some(e => equalityFn(e.value, val))) return;
+                    } else if (noDuplicate) {
+                        if (history.some(e => JSON.stringify(e.value) === JSON.stringify(val))) return;
+                        if (merged.some(e => JSON.stringify(e.value) === JSON.stringify(val))) return;
+                    }
+
+                    merged.push({
+                        value: deepClone(val),
+                        meta: entry.meta,
+                        group: entry.group
+                    });
+                });
+            }
+        });
+
+        // Insert by position
+        if (position === "start") {
+            history.unshift(...merged);
+        } else if (position === "end") {
+            history.push(...merged);
+        } else if (typeof position === "number") {
+            history.splice(position, 0, ...merged);
+        }
+
+        // Trim to maxHistory
+        if (history.length > maxHistory) {
+            history.splice(0, history.length - maxHistory);
+        }
+
+        // Reset redoStack
+        redoStack.length = 0;
+
+        // Update fn.value
+        fn.value = history[history.length - 1]?.value ?? fn.initialValue;
+
+        notifySubscribers();
+        return fn.value;
+    };
+
+
+    // Sort history entries accending, descending, or reset to default
+    fn.sort = (orderOrFn = "default") => {
+        if (!storeHistory) return fn.value;
+
+        let sorted = [...history];
+
+        if (orderOrFn === "default") {
+            // restore insertion order
+            sorted.sort((a, b) => (a._index ?? 0) - (b._index ?? 0));
+        }
+        else if (orderOrFn === "asc") {
+            sorted.sort((a, b) => {
+                if (typeof a.value === "number" && typeof b.value === "number") {
+                    return a.value - b.value;
+                }
+                return String(a.value).localeCompare(String(b.value));
+            });
+        }
+        else if (orderOrFn === "desc") {
+            sorted.sort((a, b) => {
+                if (typeof a.value === "number" && typeof b.value === "number") {
+                    return b.value - a.value;
+                }
+                return String(b.value).localeCompare(String(a.value));
+            });
+        }
+        else if (typeof orderOrFn === "function") {
+            // 🆕 full entry comparator (not just value)
+            sorted.sort((a, b) => orderOrFn(a, b));
+        }
+
+        // 🔒 Deduplicate after sort
+        const deduped = [];
+        sorted.forEach(entry => {
+            const val = entry.value;
+            if (noDuplicate && equalityFn) {
+                if (deduped.some(e => equalityFn(e.value, val))) return;
+            } else if (noDuplicate) {
+                if (deduped.some(e => JSON.stringify(e.value) === JSON.stringify(val))) return;
+            }
+            deduped.push(entry);
+        });
+
+        // overwrite history with deduped
+        history.length = 0;
+        history.push(...deduped);
+
+        fn.value = history[history.length - 1]?.value ?? fn.initialValue;
+        notifySubscribers();
+        return fn.value;
+    };
+
+
     // Serialize/Deserialize history for persistence
     fn.serializeHistory = () => JSON.stringify(history);
     fn.deserializeHistory = (data) => {
@@ -205,7 +381,9 @@ export default function Executor(callback, options = {}) {
             history.push(...data.map(entry => ({
                 value: deepClone(entry.value),
                 meta: entry.meta,
-                group: entry.group
+                group: entry.group,
+                _index: entry._index,
+                _time: entry._time
             })));
             fn.value = history[history.length - 1].value;
             redoStack.length = 0;
@@ -213,24 +391,109 @@ export default function Executor(callback, options = {}) {
         }
     };
 
-    // Export/Import full state
-    fn.exportHistory = () => JSON.stringify({ value: fn.value, history, redoStack });
-    fn.importHistory = (json) => {
+    // ✅ Export full state safely
+    fn.exportHistory = () => {
         try {
-            const data = JSON.parse(json);
-            if (Array.isArray(data.history)) {
-                history.length = 0;
-                history.push(...data.history);
-                redoStack.length = 0;
-                if (Array.isArray(data.redoStack)) redoStack.push(...data.redoStack);
-                fn.value = data.value;
-                notifySubscribers();
-            }
+            return JSON.stringify({
+                value: fn.value,
+                initialValue: fn.initialValue,
+                history: history.map(entry => ({
+                    value: deepClone(entry.value),
+                    meta: entry.meta,
+                    group: entry.group,
+                    _index: entry._index,
+                    _time: entry._time
+                })),
+                redoStack: redoStack.map(entry => ({
+                    value: deepClone(entry.value),
+                    meta: entry.meta,
+                    group: entry.group,
+                    _index: entry._index,
+                    _time: entry._time
+                }))
+            });
         } catch (e) {
             if (onError) onError(e);
             else throw e;
         }
     };
+
+    // ✅ Import full state safely
+    fn.importHistory = (json) => {
+        try {
+            const data = JSON.parse(json);
+
+            if (Array.isArray(data.history)) {
+                history.length = 0;
+                history.push(...data.history.map(entry => ({
+                    value: deepClone(entry.value),
+                    meta: entry.meta,
+                    group: entry.group,
+                    _index: entry._index,
+                    _time: entry._time
+                })));
+            }
+
+            redoStack.length = 0;
+            if (Array.isArray(data.redoStack)) {
+                redoStack.push(...data.redoStack.map(entry => ({
+                    value: deepClone(entry.value),
+                    meta: entry.meta,
+                    group: entry.group,
+                    _index: entry._index,
+                    _time: entry._time
+                })));
+            }
+
+            fn.value = deepClone(data.value ?? fn.initialValue);
+            notifySubscribers();
+        } catch (e) {
+            if (onError) onError(e);
+            else throw e;
+        }
+    };
+
+    // 🆕 Export history to a downloadable JSON file
+    fn.exportHistoryToFile = (filename = "executor-history.json") => {
+        const json = fn.exportHistory(); // uses the safe version we wrote
+        const blob = new Blob([json], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+
+        URL.revokeObjectURL(url);
+    };
+
+    // 🆕 Import history from a user-selected JSON file
+    fn.importHistoryFromFile = () => {
+        return new Promise((resolve, reject) => {
+            const input = document.createElement("input");
+            input.type = "file";
+            input.accept = "application/json";
+
+            input.onchange = async (event) => {
+                const file = event.target.files[0];
+                if (!file) return reject("No file selected");
+
+                try {
+                    const text = await file.text();
+                    fn.importHistory(text); // reuse safe import
+                    resolve(fn.value);
+                } catch (e) {
+                    if (onError) onError(e);
+                    reject(e);
+                }
+            };
+
+            input.click();
+        });
+    };
+
 
     // Batch multiple calls into one history entry
     fn.batch = (callback) => {
@@ -247,15 +510,50 @@ export default function Executor(callback, options = {}) {
     fn.pauseHistory = () => { historyPaused = true; };
     fn.resumeHistory = () => { historyPaused = false; };
 
+
     // Subscription management
     fn._subscribe = (cb) => subscribers.add(cb);
     fn._unsubscribe = (cb) => subscribers.delete(cb);
 
-    // 🆕 Filter history
-    fn.filterHistory = (predicate) => {
+
+    // Extend filterHistory with common query helpers
+    fn.filterHistory = (predicateOrOptions) => {
         if (!storeHistory) return [];
-        return history.filter(entry => predicate(entry));
+
+        // Case 1: user passes a function → behave like before
+        if (typeof predicateOrOptions === "function") {
+            return history.filter(entry => predicateOrOptions(entry));
+        }
+
+        // Case 2: user passes an options object
+        const {
+            group,
+            meta,
+            after,   // timestamp (ms) or Date
+            before,  // timestamp (ms) or Date
+            range,   // [start, end] timestamps
+        } = predicateOrOptions || {};
+
+        return history.filter(entry => {
+            // group check
+            if (group && entry.group !== group) return false;
+
+            // meta check (shallow compare)
+            if (meta && JSON.stringify(entry.meta) !== JSON.stringify(meta)) return false;
+
+            // timestamp checks
+            if (after && entry._time <= (after instanceof Date ? after.getTime() : after)) return false;
+            if (before && entry._time >= (before instanceof Date ? before.getTime() : before)) return false;
+
+            if (range && (
+                entry._time < (range[0] instanceof Date ? range[0].getTime() : range[0]) ||
+                entry._time > (range[1] instanceof Date ? range[1].getTime() : range[1])
+            )) return false;
+
+            return true;
+        });
     };
+
 
     return fn;
 }
@@ -263,16 +561,25 @@ export default function Executor(callback, options = {}) {
 // 🆕 Combine multiple executors into one group
 Executor.combine = (...executors) => {
     const group = {};
-    group.undo = () => executors.forEach(fn => fn.undo());
-    group.redo = () => executors.forEach(fn => fn.redo());
-    group.reset = () => executors.forEach(fn => fn.reset());
+
+    group.undo = () => executors.map(fn => fn.undo());
+    group.redo = () => executors.map(fn => fn.redo());
+    group.reset = () => executors.map(fn => fn.reset());
+
     group.export = () => executors.map(fn => fn.exportHistory());
-    group.import = (dataArr) => {
-        if (!Array.isArray(dataArr)) return;
-        executors.forEach((fn, i) => fn.importHistory(dataArr[i]));
+
+    group.importAll = (dataArr) => {
+        if (!Array.isArray(dataArr)) {
+            throw new Error("ExecutorGroup.importAll expects an array of JSON strings");
+        }
+        executors.forEach((fn, i) => {
+            if (dataArr[i]) fn.importHistory(dataArr[i]);
+        });
     };
+
     return group;
 };
+
 
 
 // React Hook for auto re-rendering
