@@ -614,7 +614,6 @@ export function useExecutor(executor) {
 // Later we can add a way to profile performance of executor calls and history management
 // Later we can add a way to handle large data structures efficiently
 // Later we can add a way to visualize the call stack leading to each history entry
-// Later we can add a way to merge multiple history entries into one
 // Later we can add a way to split a history entry into multiple entries
 // Later we can add a way to customize the initial state and behavior of the executor
 
