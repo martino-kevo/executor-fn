@@ -36,6 +36,7 @@ export default function Executor(callback, options = {}) {
     let stepCounter = 0; // for historyStep
 
     let initialValue;
+    let eCounter = 0;
     try {
         if (callNow) {
             initialValue = callback(...initialArgs);
@@ -43,7 +44,9 @@ export default function Executor(callback, options = {}) {
                 history.push({
                     value: deepClone(initialValue),
                     meta: metadataFn?.(initialValue),
-                    group: groupBy?.(initialValue)
+                    group: groupBy?.(initialValue),
+                    _index: eCounter++,    // new insertion index
+                    _time: Date.now()      // new timestamp
                 });
             }
         }
@@ -289,7 +292,9 @@ export default function Executor(callback, options = {}) {
                     merged.push({
                         value: deepClone(val),
                         meta: entry.meta,
-                        group: entry.group
+                        group: entry.group,
+                        _index: entry._index,
+                        _time: entry._time
                     });
                 });
             }
@@ -346,6 +351,14 @@ export default function Executor(callback, options = {}) {
                 return String(b.value).localeCompare(String(a.value));
             });
         }
+        else if (orderOrFn === "groupAsc") {
+            // 🔥 sort by group label (alphabetical ascending)
+            sorted.sort((a, b) => String(a.group ?? "").localeCompare(String(b.group ?? "")));
+        }
+        else if (orderOrFn === "groupDesc") {
+            // 🔥 sort by group label (alphabetical descending)
+            sorted.sort((a, b) => String(b.group ?? "").localeCompare(String(a.group ?? "")));
+        }
         else if (typeof orderOrFn === "function") {
             // 🆕 full entry comparator (not just value)
             sorted.sort((a, b) => orderOrFn(a, b));
@@ -370,6 +383,54 @@ export default function Executor(callback, options = {}) {
         fn.value = history[history.length - 1]?.value ?? fn.initialValue;
         notifySubscribers();
         return fn.value;
+    };
+
+
+    // Split history into multiple Executors by index ranges
+    fn.split = (...ranges) => {
+        const result = {};
+
+        ranges.forEach((range, i) => {
+            if (!Array.isArray(range) || range.length === 0) return;
+
+            let indices = [];
+
+            if (range.length === 2 && typeof range[0] === "number" && typeof range[1] === "number") {
+                // Treat [start, end] as a range
+                const [start, end] = range;
+                const step = start <= end ? 1 : -1;
+                for (let idx = start; step > 0 ? idx <= end : idx >= end; idx += step) {
+                    indices.push(idx);
+                }
+            } else {
+                // Treat as explicit indices [0, 2, 5]
+                indices = range;
+            }
+
+            // Collect history entries by indices
+            const subset = indices
+                .map(idx => history[idx])
+                .filter(Boolean)
+                .map(entry => ({
+                    value: deepClone(entry.value),
+                    meta: entry.meta,
+                    group: entry.group,
+                    _index: entry._index
+                }));
+
+            // Create a new Executor seeded with this subset
+            const mini = Executor(() => fn.initialValue, {
+                storeHistory: true,
+                callNow: false
+            });
+
+            mini.history = subset;
+            mini.value = subset[subset.length - 1]?.value ?? fn.initialValue;
+
+            result[`ex${i + 1}`] = mini;
+        });
+
+        return result; // { ex1, ex2, ... }
     };
 
 
@@ -565,6 +626,7 @@ Executor.combine = (...executors) => {
     group.undo = () => executors.map(fn => fn.undo());
     group.redo = () => executors.map(fn => fn.redo());
     group.reset = () => executors.map(fn => fn.reset());
+    group.clearHistory = () => executors.map(fn => fn.clearHistory());
 
     group.export = () => executors.map(fn => fn.exportHistory());
 
@@ -614,6 +676,5 @@ export function useExecutor(executor) {
 // Later we can add a way to profile performance of executor calls and history management
 // Later we can add a way to handle large data structures efficiently
 // Later we can add a way to visualize the call stack leading to each history entry
-// Later we can add a way to split a history entry into multiple entries
 // Later we can add a way to customize the initial state and behavior of the executor
 

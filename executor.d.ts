@@ -61,6 +61,7 @@ export type ExecutorInstance<T> = ((...args: any[]) => Promise<T>) & {
     pauseHistory(): void;
     resumeHistory(): void;
     filterHistory(predicate: (entry: HistoryEntry<T>) => boolean): HistoryEntry<T>[]; // query history
+    split(...ranges: Array<[number, number] | number[]>): Record<string, ExecutorInstance<T>>; // split into multiple executors
 
     // 🆕 Advanced history ops
     copy(histories: HistoryEntry<T>[][]): T; // overwrite with other histories
@@ -69,7 +70,7 @@ export type ExecutorInstance<T> = ((...args: any[]) => Promise<T>) & {
         opts?: { position?: "start" | "end" | number; overwrite?: boolean }
     ): T;
     sort(
-        orderOrFn?: "default" | "asc" | "desc" | ((a: T, b: T) => number)
+        orderOrFn?: "default" | "asc" | "desc" | "groupAsc" | "groupDesc" | ((a: T, b: T) => number)
     ): T;
 
     // Subscriptions
@@ -97,12 +98,13 @@ export type ExecutorGroup = {
     undo(): any[];         // returns array of results from each executor
     redo(): any[];         // same
     reset(): any[];        // same
+    clearHistory(): any[];        // same
     export(): string[];    // JSON dumps from each executor
     importAll(dataArr: string[]): void; // safer than "import"
 };
 
 export namespace Executor {
-    export function combine<T>(...executors: ExecutorInstance<T>[]): ExecutorGroup;
+    export function combine(...executors: ExecutorInstance<any>[]): ExecutorGroup;
 }
 
 
