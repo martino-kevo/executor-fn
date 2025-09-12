@@ -388,13 +388,19 @@ export default function ExecutorV2(callback, options = {}) {
 // React hook integration
 // =========================
 export function useExecutor(executor) {
-    return useSyncExternalStore(
+    if (!executor || typeof executor !== "function") {
+        throw new Error("useExecutor: must receive a valid Executor instance");
+    }
+
+    const value = useSyncExternalStore(
         (cb) => {
             executor._subscribe(cb);
             return () => executor._unsubscribe(cb);
         },
         () => executor.value()
     );
+
+    return value;
 }
 
 // =========================

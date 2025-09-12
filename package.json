@@ -9,6 +9,10 @@
         ".": {
             "import": "./executor.js",
             "types": "./executor.d.ts"
+        },
+        "./v2": {
+            "import": "./executorV2.js",
+            "types": "./executorV2.d.ts"
         }
     },
     "keywords": [
@@ -23,7 +27,7 @@
         "zustand",
         "redux-alternative"
     ],
-    "author": "Martins Kelvin",
+    "author": "Martins Kelvin  <martinsifekelvin@gmail.com>",
     "license": "MIT",
     "repository": {
         "type": "git",

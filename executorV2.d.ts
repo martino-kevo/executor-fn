@@ -1,4 +1,4 @@
-import { Dispatch, SetStateAction } from "react";
+// executorV2.d.ts
 
 // =========================
 // Options for configuring Executor
@@ -14,7 +14,6 @@ export type ExecutorOptions<T> = {
     onError?: (error: unknown) => void;
     historyStep?: number;
     groupBy?: (value: T) => string;
-    useIndexedDB?: boolean;
 };
 
 // =========================
@@ -32,52 +31,58 @@ export type HistoryEntry<T> = {
 // Executor instance type
 // =========================
 export type ExecutorInstance<T> = ((...args: any[]) => Promise<T>) & {
-    value: () => T;
-    initialValue: () => T;
+    value: T;
+    initialValue: T;
+    history?: HistoryEntry<T>[];
+    redoStack?: HistoryEntry<T>[];
 
     // Core
-    log(): Promise<void>;
-    reset(): Promise<T>;
-    undo(steps?: number): Promise<T>;
-    redo(steps?: number): Promise<T>;
-    jumpTo(index: number): Promise<T | undefined>;
-    replaceAt(index: number, newValue: T): Promise<T | undefined>;
-    insertAt(index: number, newValue: T): Promise<T | undefined>;
-    removeAt(index: number): Promise<T | undefined>;
+    log(): void;
+    reset(): T;
+    undo(steps?: number): T;
+    redo(steps?: number): T;
+    jumpTo(index: number): T | undefined;
+    replaceAt(index: number, newValue: T): T | undefined;
+    insertAt(index: number, newValue: T): T | undefined;
+    removeAt(index: number): T | undefined;
 
     // Serialization
-    serializeHistory(): Promise<string>;
-    deserializeHistory(data: HistoryEntry<T>[]): Promise<void>;
-    exportHistory(): Promise<string>;
-    importHistory(json: string): Promise<void>;
-    exportHistoryToFile(filename?: string): Promise<void>;
+    serializeHistory(): string;
+    deserializeHistory(data: HistoryEntry<T>[]): void;
+    exportHistory(): string;
+    importHistory(json: string): void;
+
+    // File-based persistence
+    exportHistoryToFile(filename?: string): void;
     importHistoryFromFile(): Promise<T>;
 
     // History management
-    getHistory(): Promise<HistoryEntry<T>[]>;
-    clearHistory(): Promise<T>;
+    clearHistory(): T;
     batch(callback: () => void): void;
     pauseHistory(): void;
     resumeHistory(): void;
-    _subscribe(cb: () => void): void;
-    _unsubscribe(cb: () => void): void;
+    filterHistory(predicate: (entry: HistoryEntry<T>) => boolean): HistoryEntry<T>[];
+    split(...ranges: Array<[number, number] | number[]>): Record<string, ExecutorInstance<T>>;
 
-    // Advanced history ops
-    copy(histories: HistoryEntry<T>[][]): Promise<T>;
+    // Advanced history operations
+    copy(histories: HistoryEntry<T>[][]): T;
     merge(
         histories: HistoryEntry<T>[][],
         opts?: { position?: "start" | "end" | number; overwrite?: boolean }
-    ): Promise<T>;
+    ): T;
     sort(
-        orderOrFn?: "default" | "asc" | "desc" | ((a: T, b: T) => number)
-    ): Promise<T>;
-    split(...ranges: Array<[number, number] | number[]>): Promise<Record<string, ExecutorInstance<T>>>;
+        orderOrFn?: "default" | "asc" | "desc" | "groupAsc" | "groupDesc" | ((a: T, b: T) => number)
+    ): T;
+
+    // Subscriptions
+    _subscribe(cb: () => void): void;
+    _unsubscribe(cb: () => void): void;
 };
 
 // =========================
 // Main Executor function
 // =========================
-export default function ExecutorV2<T>(
+export function Executor<T>(
     callback: (...args: any[]) => T | Promise<T>,
     options?: ExecutorOptions<T>
 ): ExecutorInstance<T>;
@@ -88,15 +93,17 @@ export default function ExecutorV2<T>(
 export function useExecutor<T>(executor: ExecutorInstance<T>): T;
 
 // =========================
-// ExecutorGroup
+// Combine multiple executors into one group
 // =========================
 export type ExecutorGroup = {
-    undo(): Promise<any[]>;
-    redo(): Promise<any[]>;
-    reset(): Promise<any[]>;
-    clearHistory(): Promise<any[]>;
-    export(): Promise<string[]>;
-    importAll(dataArr: string[]): Promise<void>;
+    undo(): any[];
+    redo(): any[];
+    reset(): any[];
+    clearHistory(): any[];
+    export(): string[];
+    importAll(dataArr: string[]): void;
 };
 
-export function combineExecutors(...executors: ExecutorInstance<any>[]): ExecutorGroup;
+export namespace Executor {
+    export function combine(...executors: ExecutorInstance<any>[]): ExecutorGroup;
+}
