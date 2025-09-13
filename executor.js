@@ -36,7 +36,9 @@ export default function Executor(callback, options = {}) {
     let stepCounter = 0; // for historyStep
 
     let initialValue;
-    let eCounter = 0;
+
+    let entryCounter = 0; // monotonic index
+
     try {
         if (callNow) {
             initialValue = callback(...initialArgs);
@@ -45,7 +47,7 @@ export default function Executor(callback, options = {}) {
                     value: deepClone(initialValue),
                     meta: metadataFn?.(initialValue),
                     group: groupBy?.(initialValue),
-                    _index: eCounter++,    // new insertion index
+                    _index: ++entryCounter,    // new insertion index
                     _time: Date.now()      // new timestamp
                 });
             }
@@ -56,8 +58,6 @@ export default function Executor(callback, options = {}) {
     }
 
     const notifySubscribers = () => subscribers.forEach(cb => cb());
-
-    let entryCounter = 0; // monotonic index
 
     const pushToHistory = (result) => {
         if (!storeHistory || historyPaused) return;
@@ -84,7 +84,7 @@ export default function Executor(callback, options = {}) {
             value: deepClone(result),
             meta: metadataFn?.(result),
             group: groupBy?.(result),
-            _index: entryCounter++,    // new insertion index
+            _index: ++entryCounter,    // new insertion index
             _time: Date.now()          // new timestamp
         });
 
@@ -119,11 +119,14 @@ export default function Executor(callback, options = {}) {
     fn.reset = () => {
         fn.value = fn.initialValue;
         if (storeHistory) {
+            entryCounter = 0
             history.length = 0;
             history.push({
                 value: deepClone(fn.initialValue),
                 meta: metadataFn?.(fn.initialValue),
-                group: groupBy?.(fn.initialValue)
+                group: groupBy?.(fn.initialValue),
+                _index: ++entryCounter,
+                _time: Date.now()
             });
             redoStack.length = 0;
         }
@@ -180,7 +183,7 @@ export default function Executor(callback, options = {}) {
         history[index] = {
             value: deepClone(newValue),
             meta: metadataFn?.(newValue),
-            group: groupBy?.(newValue)
+            group: groupBy?.(newValue),
         };
         if (index === history.length - 1) fn.value = newValue;
         notifySubscribers();
@@ -193,7 +196,9 @@ export default function Executor(callback, options = {}) {
             history.splice(index, 0, {
                 value: deepClone(newValue),
                 meta: metadataFn?.(newValue),
-                group: groupBy?.(newValue)
+                group: groupBy?.(newValue),
+                _index: ++entryCounter,
+                _time: Date.now()
             });
             fn.value = newValue;
             notifySubscribers();
@@ -208,7 +213,9 @@ export default function Executor(callback, options = {}) {
             history.push({
                 value: deepClone(fn.value),
                 meta: metadataFn?.(fn.value),
-                group: groupBy?.(fn.value)
+                group: groupBy?.(fn.value),
+                _index: entryCounter,
+                _time: Date.now()
             });
             redoStack.length = 0;
             notifySubscribers();
@@ -240,7 +247,9 @@ export default function Executor(callback, options = {}) {
                     copied.push({
                         value: deepClone(val),
                         meta: entry.meta,
-                        group: entry.group
+                        group: entry.group,
+                        _index: entry._index,
+                        _time: entry._time
                     });
                 });
             }
@@ -415,7 +424,8 @@ export default function Executor(callback, options = {}) {
                     value: deepClone(entry.value),
                     meta: entry.meta,
                     group: entry.group,
-                    _index: entry._index
+                    _index: entry._index,
+                    _time: entry._time
                 }));
 
             // Create a new Executor seeded with this subset
