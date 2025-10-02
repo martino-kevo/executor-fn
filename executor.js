@@ -655,7 +655,7 @@ Executor.combine = (...executors) => {
 
 
 // React Hook for auto re-rendering
-export function useExecutor(executor) {
+export function useExecutor(executor, fullPower = false) {
     if (!executor || typeof executor !== "function") {
         throw new Error("useExecutor: must receive a valid Executor instance");
     }
@@ -668,9 +668,8 @@ export function useExecutor(executor) {
         () => executor.value
     );
 
-    return executor; // 👈 full power (value + methods)
+    return !fullPower ? executor.value : executor; // return full executor (value + methods) if requested
 }
-
 
 
 
