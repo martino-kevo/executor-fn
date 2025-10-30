@@ -1,44 +1,50 @@
 {
-    "name": "executor-fn",
-    "version": "1.1.2",
-    "description": "A lightweight function wrapper with optional state, history, undo/redo, and reset support. Use like a normal function or unlock powerful time-travel features.",
-    "main": "executor.js",
-    "types": "executor.d.ts",
-    "type": "module",
-    "exports": {
-        ".": {
-            "import": "./executor.js",
-            "types": "./executor.d.ts"
-        },
-        "./v2": {
-            "import": "./executorV2.js",
-            "types": "./executorV2.d.ts"
-        }
+  "name": "executor-fn",
+  "version": "1.1.2",
+  "description": "Lightweight function wrapper for stateful logic, undo/redo history, and time-travel debugging. Works in React, Node, or plain JavaScript.",
+  "main": "executor.js",
+  "types": "executor.d.ts",
+  "type": "module",
+  "exports": {
+    ".": {
+      "import": "./executor.js",
+      "types": "./executor.d.ts"
     },
-    "keywords": [
-        "executor",
-        "function-wrapper",
-        "undo",
-        "redo",
-        "history",
-        "state",
-        "utility",
-        "react",
-        "zustand",
-        "redux-alternative"
-    ],
-    "author": "Martins Kelvin  <martinsifekelvin@gmail.com>",
-    "license": "MIT",
-    "repository": {
-        "type": "git",
-        "url": "git+https://github.com/martino-kevo/executor-fn.git"
-    },
-    "peerDependencies": {
-        "react": ">=17.0.0"
-    },
-    "peerDependenciesMeta": {
-        "react": {
-            "optional": true
-        }
+    "./v2": {
+      "import": "./executorV2.js",
+      "types": "./executorV2.d.ts"
     }
+  },
+  "keywords": [
+    "executor",
+    "function-wrapper",
+    "state-manager",
+    "undo",
+    "redo",
+    "history",
+    "state",
+    "react",
+    "react-hook",
+    "zustand",
+    "redux",
+    "redux-alternative",
+    "store",
+    "reactive",
+    "functional-programming",
+    "utility"
+  ],
+  "author": "Martins Kelvin  <martinsifekelvin@gmail.com>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/martino-kevo/executor-fn.git"
+  },
+  "peerDependencies": {
+    "react": ">=17.0.0"
+  },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    }
+  }
 }
