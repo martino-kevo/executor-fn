@@ -1,6 +1,6 @@
 {
   "name": "executor-fn",
-  "version": "1.1.2",
+  "version": "1.1.3",
   "description": "Lightweight function wrapper for stateful logic, undo/redo history, and time-travel debugging. Works in React, Node, or plain JavaScript.",
   "main": "executor.js",
   "types": "executor.d.ts",
