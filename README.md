@@ -26,9 +26,10 @@ Think of it as:
 ```bash
 npm install executor-fn
 
+```
 
-💡 Quick Start
-
+### 💡 Quick Start
+```bash
 import { Executor } from "executor-fn";
 
 // Create a reactive function
@@ -46,10 +47,12 @@ counter.redo(); // forward to 6
 console.log(counter.value);   // 6
 console.log(counter.history); // [0, 1, 6]
 
+```
 
-⚛️ React Integration (with useExecutor)
+### ⚛️ React Integration (with useExecutor)
 Bind Executor directly to your UI — no setState needed.
 
+```bash
 import React from "react";
 import { Executor, useExecutor } from "executor-fn";
 
@@ -72,12 +75,15 @@ export default function Counter() {
     </div>
   );
 }
+```
+
 🧠 No Redux. No Zustand. No boilerplate.
 Just one function with memory, history, and hooks.
 
-🧱 Advanced Example – Mini Text Editor
+### 🧱 Advanced Example – Mini Text Editor
 Use Executor to power an editor with live undo/redo:
 
+```bash
 import React, { useState } from "react";
 import { Executor } from "executor-fn";
 
@@ -106,29 +112,32 @@ export default function TextEditorApp() {
     </div>
   );
 }
+```
 
-📄 More examples: examples/ - folder
+**📄 More examples: examples/ - folder**
 
-🧩 Key Features
-⚡ Immediate Execution — runs instantly with callNow
-🧠 Persistent Value — latest result always at .value
-⏪ Undo / Redo — auto-tracked history
-🧩 Works Anywhere — Node, React, Vanilla JS
-🎯 Composable — build stores, editors, or workflows
-💾 Serializable — export/import history
+## 🧩 Key Features
+
+-⚡ Immediate Execution — runs instantly with callNow
+-🧠 Persistent Value — latest result always at .value
+-⏪ Undo / Redo — auto-tracked history
+-🧩 Works Anywhere — Node, React, Vanilla JS
+-🎯 Composable — build stores, editors, or workflows
+-💾 Serializable — export/import history
 
 
-🌟 Summary
-Feature	         ->   Description
-🪶 Lightweight	 -   Zero dependencies
-🧭 Universal	   -   Works with Node, React, or Vanilla
-🧠 Smart	     -     Remembers value, tracks history
-🔄 Reversible	  -    Built-in undo/redo/reset
-⚛️ Reactive	    -    Direct React integration via useExecutor()
+## 🌟 Summary
+| Feature	       |     Description  |
+|----------------|------------------|
+| 🪶 Lightweight	 -   Zero dependencies                          |
+| 🧭 Universal	   -   Works with Node, React, or Vanilla         |
+| 🧠 Smart	     -     Remembers value, tracks history            |
+| 🔄 Reversible	  -    Built-in undo/redo/reset                   |
+| ⚛️ Reactive	    -    Direct React integration via useExecutor() |
 
-💬 “Once you master Executor, any JS framework becomes your playground.”
+_💬 “Once you master Executor, any JS framework becomes your playground.”_
 
-**💡 The Story Behind Executor**
+## 💡 The Story Behind Executor
 
 I didn’t build Executor by reading tons of docs or following a course.
 I was just a curious developer who wanted to understand JavaScript callbacks — so curious that I literally prayed to God to help me understand programming better.
