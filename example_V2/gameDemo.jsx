@@ -1,23 +1,18 @@
-import React, { useState, useEffect, useRef, useMemo } from "react";
-import { Executor, useExecutor } from "./executorV2";
+import React, { useState, useEffect, useRef } from "react";
+import { ExecutorV2, useExecutor } from "executor-fn/v2";
+
+// Executor instance
+const executor = ExecutorV2((state) => state, {
+  storeHistory: true,
+  maxHistory,
+  historyStep,
+  useIndexedDB: false,
+});
 
 export default function ExecutorV2GameDemo() {
   const [maxHistory, setMaxHistory] = useState(5000);
   const [historyStep, setHistoryStep] = useState(10);
   const totalUpdates = 100000;
-
-  // Executor instance
-  const executor = useMemo(() => {
-    return Executor(
-      (state) => state,
-      {
-        storeHistory: true,
-        maxHistory,
-        historyStep,
-        useIndexedDB: false,
-      }
-    );
-  }, [maxHistory, historyStep]);
 
   const currentState = useExecutor(executor);
   const [progress, setProgress] = useState(0);
@@ -51,7 +46,7 @@ export default function ExecutorV2GameDemo() {
     }, 1);
 
     return () => clearInterval(intervalRef.current);
-  }, [executor]);
+  }, [currentState]);
 
   // Undo/Redo handlers
   const handleUndo = () => {
@@ -80,10 +75,12 @@ export default function ExecutorV2GameDemo() {
     <div style={{ padding: "2rem", fontFamily: "sans-serif" }}>
       <h1>ExecutorV2 Game Demo with Live Stats</h1>
       <p>
-        Updates processed: {progress.toLocaleString()} / {totalUpdates.toLocaleString()}
+        Updates processed: {progress.toLocaleString()} /{" "}
+        {totalUpdates.toLocaleString()}
       </p>
       <p>
-        Current position: x={currentState?.x?.toFixed(1)}, y={currentState?.y?.toFixed(1)}
+        Current position: x={currentState?.x?.toFixed(1)}, y=
+        {currentState?.y?.toFixed(1)}
       </p>
 
       {/* Dynamic Controls */}
@@ -116,9 +113,15 @@ export default function ExecutorV2GameDemo() {
 
       {/* Undo/Redo Buttons */}
       <div style={{ margin: "1rem 0" }}>
-        <button onClick={handleUndo} style={{ marginRight: "0.5rem" }}>Undo</button>
-        <button onClick={handleRedo} style={{ marginRight: "0.5rem" }}>Redo</button>
-        <button onClick={handleJumpToStart} style={{ marginRight: "0.5rem" }}>Jump to Start</button>
+        <button onClick={handleUndo} style={{ marginRight: "0.5rem" }}>
+          Undo
+        </button>
+        <button onClick={handleRedo} style={{ marginRight: "0.5rem" }}>
+          Redo
+        </button>
+        <button onClick={handleJumpToStart} style={{ marginRight: "0.5rem" }}>
+          Jump to Start
+        </button>
         <button onClick={handleJumpToEnd}>Jump to End</button>
       </div>
 
@@ -129,7 +132,15 @@ export default function ExecutorV2GameDemo() {
       </div>
 
       {/* Game Canvas */}
-      <div style={{ marginTop: "2rem", width: "400px", height: "400px", position: "relative", border: "1px solid #ccc" }}>
+      <div
+        style={{
+          marginTop: "2rem",
+          width: "400px",
+          height: "400px",
+          position: "relative",
+          border: "1px solid #ccc",
+        }}
+      >
         <div
           style={{
             width: "20px",
@@ -145,7 +156,8 @@ export default function ExecutorV2GameDemo() {
       </div>
 
       <p style={{ marginTop: "1rem", fontSize: "0.9rem", color: "#666" }}>
-        Adjust <b>maxHistory</b> and <b>historyStep</b> dynamically to see how memory usage and undo/redo speed react in real-time.
+        Adjust <b>maxHistory</b> and <b>historyStep</b> dynamically to see how
+        memory usage and undo/redo speed react in real-time.
       </p>
     </div>
   );

@@ -1,4 +1,4 @@
-import Executor from "../executor.js"
+import { Executor } from "../executor.js"
 
 // 🔹 Example 1: Basic usage
 const add = Executor((a, b) => a + b)

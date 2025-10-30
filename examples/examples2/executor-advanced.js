@@ -1,4 +1,4 @@
-import { Executor } from "./executor.js";
+import { Executor } from "../../executor.js";
 
 // Main executor: groups numbers as "low"/"high"
 const mainExec = Executor((x) => x, {

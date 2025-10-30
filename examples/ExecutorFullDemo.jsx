@@ -1,19 +1,19 @@
 // ExecutorFullDemo.jsx
 import React, { useState } from "react";
-import Executor, { useExecutor } from "./executor";
+import { Executor, useExecutor } from "executor-fn";
 
 // ----------------------
 // Executor setup
 // ----------------------
 const counter = Executor(
-    async (increment = 1) => {
+    async (increment) => {
         await new Promise((r) => setTimeout(r, 200)); // simulate async
         return (counter.value || 0) + increment;
     },
     {
         storeHistory: true,
         callNow: true,
-        initialArgs: [0],
+        initialArgs: [1],
         metadataFn: (value) => ({ timestamp: new Date().toLocaleTimeString() }),
     }
 );
@@ -68,7 +68,7 @@ export default function ExecutorFullDemo() {
         <div style={{ padding: "2rem", fontFamily: "sans-serif" }}>
             <h1>Executor Full Demo</h1>
             <h2>
-                Current Value: {current.value} {loading && "⏳"}
+                Current Value: {current} {loading && "⏳"}
             </h2>
 
             <div style={{ display: "flex", gap: "0.5rem", marginBottom: "1rem" }}>

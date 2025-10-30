@@ -1,4 +1,4 @@
-import { Executor } from "./executor.js"; // your library
+import { Executor } from "../../executor.js"; // your library
 
 // Create main executor
 const mainExec = Executor((x) => x, { storeHistory: true });

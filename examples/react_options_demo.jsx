@@ -1,29 +1,25 @@
 import React from "react";
-import Executor, { useExecutor } from "./executor";
+import { Executor, useExecutor } from "executor-fn";
+
+// ✅ Example: Counter with most options enabled
+const counter = Executor(
+  (step = 1) => {
+    if (step === "error") throw new Error("Manual error triggered!");
+    return (counter.value ?? 0) + step;
+  },
+  {
+    // Most options enabled for demonstration but are fully optional
+    storeHistory: true,
+    initialArgs: [0],
+    callNow: true,
+    maxHistory: 5,
+    equalityFn: (a, b) => a === b, // don't store duplicate values
+    onError: (err) => alert(`Executor caught an error: ${err.message}`),
+  }
+);
 
 export default function App() {
-  // ✅ Example: Counter with all options enabled
-  const counter = React.useMemo(
-    () =>
-      Executor(
-        (step = 1) => {
-          if (step === "error") throw new Error("Manual error triggered!");
-          return (counter.value ?? 0) + step;
-        },
-        {
-        // Most options enabled for demonstration but are fully optional
-          storeHistory: true,
-          initialArgs: [0],
-          callNow: true,
-          maxHistory: 5,
-          equalityFn: (a, b) => a === b, // don't store duplicate values
-          onError: (err) => alert(`Executor caught an error: ${err.message}`)
-        }
-      ),
-    []
-  );
-
-  const count = useExecutor(counter);
+  const count = useExecutor(counter, true);
 
   return (
     <div style={styles.container}>
@@ -81,17 +77,17 @@ const styles = {
     textAlign: "center",
     background: "#f8f8f8",
     borderRadius: "12px",
-    boxShadow: "0 2px 6px rgba(0,0,0,0.1)"
+    boxShadow: "0 2px 6px rgba(0,0,0,0.1)",
   },
   buttonRow: {
     display: "flex",
     justifyContent: "center",
     gap: "10px",
-    marginTop: "1rem"
+    marginTop: "1rem",
   },
   note: {
     fontSize: "0.9rem",
     marginTop: "1rem",
-    color: "#555"
-  }
+    color: "#555",
+  },
 };

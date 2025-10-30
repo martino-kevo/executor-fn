@@ -6,7 +6,7 @@
 // </head>
 // <body>
 // <script type="module">
-// import ExecutorV2 from './ExecutorV2.js';
+// import { ExecutorV2 } from '../ExecutorV2.js';
 
 // (async () => {
 //   console.log("Starting ExecutorV2 benchmark...");

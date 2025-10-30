@@ -1,5 +1,5 @@
 // store.js
-import Executor from "executor-fn";
+import { Executor } from "executor-fn";
 
 export const todosStore = Executor((prevTodos, action) => {
     switch (action.type) {

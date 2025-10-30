@@ -1,5 +1,5 @@
 import React from "react";
-import Executor, { useExecutor } from "executor-fn";
+import { Executor, useExecutor } from "executor-fn";
 
 // --- uiStore.js ---
 // This Executor stores whole JSX layouts as "state"
@@ -49,7 +49,7 @@ function LayoutSwitcher() {
           marginBottom: "1rem",
         }}
       >
-        {ui.value}
+        {ui}
       </div>
 
       <div style={{ display: "flex", gap: "0.5rem", justifyContent: "center" }}>

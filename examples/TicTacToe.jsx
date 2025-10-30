@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import Executor, { useExecutor } from "executor-fn"; // adjust import path
+import { Executor, useExecutor } from "executor-fn"; // adjust import path
 
 // Initial empty Tic-Tac-Toe board
 const initialBoard = Array(9).fill("");
@@ -70,7 +70,7 @@ export default function App() {
             </div>
 
             <h2>Score</h2>
-            <p>Player Score: {playerScore.value}</p>
+            <p>Player Score: {playerScore}</p>
 
             <div style={{ marginTop: 20 }}>
                 <button onClick={() => group.undo()}>Undo (Both)</button>

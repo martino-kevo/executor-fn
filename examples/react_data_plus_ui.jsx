@@ -1,5 +1,5 @@
 import React from "react";
-import Executor, { useExecutor } from "executor-fn";
+import { Executor, useExecutor } from "executor-fn";
 
 // --- appStore.js ---
 // Executor stores { ui, data } together as one snapshot

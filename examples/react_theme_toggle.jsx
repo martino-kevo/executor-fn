@@ -1,5 +1,5 @@
 import React from "react";
-import Executor, { useExecutor } from "executor-fn";
+import { Executor, useExecutor } from "executor-fn";
 
 // --- themeStore.js ---
 export const themeStore = Executor((theme) => theme, {
@@ -32,7 +32,7 @@ function ThemeSwitcher() {
 
     return (
         <div style={styles[theme]}>
-            <h2>{theme.value === "light" ? "🌞 Light Mode" : "🌙 Dark Mode"}</h2>
+            <h2>{theme === "light" ? "🌞 Light Mode" : "🌙 Dark Mode"}</h2>
             <p>Switch themes with undo / redo</p>
 
             <div style={{ marginTop: "1rem", display: "flex", gap: "0.5rem", justifyContent: "center" }}>

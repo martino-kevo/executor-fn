@@ -1,5 +1,5 @@
 import React from "react";
-import Executor, { useExecutor } from "executor-fn"; // adjust import path
+import { Executor, useExecutor } from "executor-fn"; // adjust import path
 
 // A simple counter executor
 const counter = Executor(
@@ -17,7 +17,7 @@ export default function CounterDemo() {
     return (
         <div style={{ padding: 20, fontFamily: "sans-serif" }}>
             <h1>Counter Demo ⚡</h1>
-            <p>Count: {count.value}</p>
+            <p>Count: {count}</p>
 
             <button onClick={() => counter(count, 1)}>+1</button>
             <button onClick={() => counter(count, -1)}>-1</button>

@@ -1,10 +1,10 @@
-import Executor from "./executor";
+import { Executor } from "../executor";
 
 // ----------------------
 // Create an executor
 // ----------------------
 const counter = Executor(
-    async (increment = 1) => {
+    async (increment) => {
         // simulate async API or computation
         await new Promise((r) => setTimeout(r, 100));
         return (counter.value || 0) + increment;
@@ -12,7 +12,7 @@ const counter = Executor(
     {
         storeHistory: true,
         callNow: true,
-        initialArgs: [0],
+        initialArgs: [1],
         metadataFn: (value) => ({ timestamp: new Date().toISOString() })
     }
 );

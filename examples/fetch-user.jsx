@@ -1,5 +1,5 @@
 import React, { useEffect } from "react";
-import Executor, { useExecutor } from "executor-fn";
+import { Executor, useExecutor } from "executor-fn";
 
 // --- store.js ---
 export const userStore = Executor((data) => data, {
@@ -51,8 +51,8 @@ export default function UserComponent() {
     return (
         <div style={{ fontFamily: "sans-serif", maxWidth: "500px", margin: "auto" }}>
             {/* Test user.name OR user.value.name to see which works */}
-            <h2>Welcome, {user.value?.name} 👋</h2>
-            <p>Email: {user.value?.email}</p>
+            <h2>Welcome, {user?.name} 👋</h2>
+            <p>Email: {user?.email}</p>
 
             {/* Debug Panel to visualize state + time travel */}
             <DebugPanel store={userStore} />
