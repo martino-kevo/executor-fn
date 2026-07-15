@@ -1,14 +1,99 @@
 // executor.js
 import { useSyncExternalStore } from "react";
 
-// Deep clone utility to avoid reference issues in history
-function deepClone(value) {
+// Deep clone utility to avoid reference issues in history.
+// `seen` tracks objects already cloned in this call so circular references
+// resolve to the already-created clone instead of recursing forever.
+function deepClone(value, seen = new WeakMap()) {
   if (value === null || typeof value !== "object") return value;
-  return Array.isArray(value)
-    ? value.map(deepClone)
-    : Object.fromEntries(
-        Object.entries(value).map(([k, v]) => [k, deepClone(v)])
-      );
+
+  // Functions and DOM nodes can't be meaningfully deep-cloned (structured
+  // cloning them throws). Keep a live reference instead of crashing —
+  // history still works, it just won't be an isolated copy for these.
+  if (typeof value === "function") return value;
+  if (typeof Node !== "undefined" && value instanceof Node) return value;
+
+  // 🆕 circular reference guard
+  if (seen.has(value)) return seen.get(value);
+
+  if (value instanceof Date) return new Date(value.getTime());
+  if (value instanceof RegExp) return new RegExp(value.source, value.flags);
+
+  if (Array.isArray(value)) {
+    const clone = [];
+    seen.set(value, clone);
+    value.forEach((item, i) => (clone[i] = deepClone(item, seen)));
+    return clone;
+  }
+
+  if (value instanceof Map) {
+    const clone = new Map();
+    seen.set(value, clone);
+    value.forEach((v, k) => clone.set(deepClone(k, seen), deepClone(v, seen)));
+    return clone;
+  }
+
+  if (value instanceof Set) {
+    const clone = new Set();
+    seen.set(value, clone);
+    value.forEach((v) => clone.add(deepClone(v, seen)));
+    return clone;
+  }
+
+  const clone = {};
+  seen.set(value, clone);
+  for (const [k, v] of Object.entries(value)) {
+    clone[k] = deepClone(v, seen);
+  }
+  return clone;
+}
+
+// 🆕 Default persistStorage adapter, backed by IndexedDB instead of
+// localStorage — handles larger payloads better and doesn't block the
+// main thread. Lazily opens the DB (only on first getItem/setItem call),
+// so constructing an Executor without persistKey never touches IndexedDB
+// at all. Returns undefined in environments without IndexedDB (SSR, Node,
+// older browsers) — same graceful fallback the old localStorage default had.
+function createIndexedDBStorage(dbName = "executor-store", storeName = "kv") {
+  if (typeof indexedDB === "undefined") return undefined;
+
+  let dbPromise = null;
+  const openDB = () => {
+    if (!dbPromise) {
+      dbPromise = new Promise((resolve, reject) => {
+        const req = indexedDB.open(dbName, 1);
+        req.onupgradeneeded = () => {
+          if (!req.result.objectStoreNames.contains(storeName)) {
+            req.result.createObjectStore(storeName);
+          }
+        };
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+      });
+    }
+    return dbPromise;
+  };
+
+  return {
+    async getItem(key) {
+      const db = await openDB();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction(storeName, "readonly");
+        const req = tx.objectStore(storeName).get(key);
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+      });
+    },
+    async setItem(key, value) {
+      const db = await openDB();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction(storeName, "readwrite");
+        tx.objectStore(storeName).put(value, key);
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+      });
+    },
+  };
 }
 
 // Main Executor function
@@ -29,6 +114,12 @@ function Executor(callback, options = {}) {
     onError, // handle errors gracefully
     historyStep = 1, // 🆕 only record every Nth snapshot
     groupBy, // 🆕 group history entries (e.g. "move", "attack")
+    seedHistory, // 🆕 pre-populate history at construction time (used internally by split())
+    seedValue, // 🆕 explicit initialValue to pair with seedHistory (defaults to its first entry)
+    persistKey, // 🆕 if set, auto-save/restore history under this key
+    persistStorage = createIndexedDBStorage(), // 🆕 sync or async {getItem, setItem} adapter; defaults to IndexedDB
+    syncTabs = false, // 🆕 if true (with persistKey), mirror state changes across tabs/windows via BroadcastChannel
+    onChange, // 🆕 called with the new value after every committed change
   } = options;
 
   const history = storeHistory ? [] : null;
@@ -38,20 +129,153 @@ function Executor(callback, options = {}) {
   let stepCounter = 0; // for historyStep
 
   let initialValue;
+  let currentValue; // set when seeding — the "current" state differs from the reset target
+  let isSeeded = false;
+  let initPromise = null; // set when callNow's callback returns a Promise (fix #2)
 
   let entryCounter = 0; // monotonic index
 
+  // Keep entryCounter ahead of the highest _index currently present in
+  // history or redoStack. Without this, copy()/merge()/deserializeHistory()/
+  // importHistory() can leave entryCounter behind the imported entries'
+  // _index values, so the next normal push reuses or collides with an
+  // existing _index — which breaks sort("default") ordering.
+  const resyncEntryCounter = () => {
+    let max = 0;
+    for (const entry of history) max = Math.max(max, entry._index ?? 0);
+    if (redoStack) {
+      for (const entry of redoStack) max = Math.max(max, entry._index ?? 0);
+    }
+    entryCounter = max;
+  };
+
+  // 🆕 Fix #1: seed history straight into the real internal array at
+  // construction time. split() used to build a fresh Executor and then do
+  // `mini.history = subset` from the outside — but that only reassigns the
+  // public property. Every method here (pushToHistory, undo, redo, jumpTo,
+  // filterHistory, ...) reads the `history` closure variable directly, not
+  // `fn.history`, so that outside reassignment never actually connected.
+  // Seeding here means the closure variable itself contains the data from
+  // the start, so every method works correctly on it.
+  // 🆕 Restore persisted history, if any, before seedHistory/callNow run —
+  // a saved session should win over re-running the initial call.
+  let loadedFromPersist = false;
+  let persistLoadPromise = null;
+
+  // Shared parse/apply helpers — used both at construction (below) and by
+  // cross-tab sync later on, so both paths interpret persisted data the
+  // exact same way.
+  const parsePersisted = (raw) => {
+    if (!raw) return null;
+    try {
+      return JSON.parse(raw);
+    } catch (err) {
+      if (onError) onError(err);
+      return null;
+    }
+  };
+
+  const applyPersistedData = (data) => {
+    history.length = 0;
+    if (Array.isArray(data.history) && data.history.length) {
+      history.push(
+        ...data.history.map((entry) => ({
+          value: deepClone(entry.value),
+          meta: entry.meta,
+          group: entry.group,
+          _index: entry._index,
+          _time: entry._time,
+        }))
+      );
+    }
+    redoStack.length = 0;
+    if (Array.isArray(data.redoStack)) {
+      redoStack.push(
+        ...data.redoStack.map((entry) => ({
+          value: deepClone(entry.value),
+          meta: entry.meta,
+          group: entry.group,
+          _index: entry._index,
+          _time: entry._time,
+        }))
+      );
+    }
+    resyncEntryCounter();
+  };
+
+  const hydrateFromPersisted = (raw) => {
+    const data = parsePersisted(raw);
+    if (!data) return false;
+    applyPersistedData(data);
+    initialValue = data.initialValue;
+    currentValue = data.value;
+    isSeeded = true;
+    return true;
+  };
+
+  if (storeHistory && persistKey && persistStorage) {
+    try {
+      const maybeSaved = persistStorage.getItem(persistKey);
+      if (maybeSaved instanceof Promise) {
+        // Async adapter (e.g. IndexedDB) — don't block construction;
+        // fn.ready resolves once this settles, same idea as async callNow
+        // below.
+        persistLoadPromise = maybeSaved.then((raw) => hydrateFromPersisted(raw));
+      } else {
+        loadedFromPersist = hydrateFromPersisted(maybeSaved);
+      }
+    } catch (err) {
+      if (onError) onError(err);
+    }
+  }
+
+  if (
+    !loadedFromPersist &&
+    !persistLoadPromise &&
+    storeHistory &&
+    Array.isArray(seedHistory) &&
+    seedHistory.length
+  ) {
+    history.push(
+      ...seedHistory.map((entry) => ({
+        value: deepClone(entry.value),
+        meta: entry.meta,
+        group: entry.group,
+        _index: entry._index,
+        _time: entry._time,
+      }))
+    );
+    resyncEntryCounter();
+    // initialValue is the reset() target — first entry in the seeded slice.
+    // currentValue is what fn.value should be right now — the last entry,
+    // matching the same "current = most recent entry" convention used by
+    // copy()/merge() elsewhere in this file.
+    initialValue = seedValue !== undefined ? seedValue : history[0]?.value;
+    currentValue = history[history.length - 1]?.value;
+    isSeeded = true;
+  }
+
   try {
-    if (callNow) {
-      initialValue = callback(...initialArgs);
-      if (storeHistory) {
-        history.push({
-          value: deepClone(initialValue),
-          meta: metadataFn?.(initialValue),
-          group: groupBy?.(initialValue),
-          _index: ++entryCounter, // new insertion index
-          _time: Date.now(), // new timestamp
-        });
+    if (callNow && !loadedFromPersist && !persistLoadPromise) {
+      const maybe = callback(...initialArgs);
+      if (maybe instanceof Promise) {
+        // 🆕 Fix #2: don't await here. Executor() must always return
+        // synchronously — callers on hot paths (a render loop, a game's
+        // per-frame update) can't tolerate a constructor that sometimes
+        // blocks. We stash the promise and commit once it resolves; see
+        // fn.ready below for how to wait on it when you do need to.
+        initPromise = maybe;
+      } else {
+        initialValue = maybe;
+        if (storeHistory) {
+          history.push({
+            value: deepClone(initialValue),
+            meta: metadataFn?.(initialValue),
+            group: groupBy?.(initialValue),
+            _index: ++entryCounter, // new insertion index
+            _time: Date.now(), // new timestamp
+          });
+        }
       }
     }
   } catch (err) {
@@ -59,7 +283,52 @@ function Executor(callback, options = {}) {
     else throw err;
   }
 
-  const notifySubscribers = () => subscribers.forEach((cb) => cb());
+  // 🆕 Unique per-instance id so a tab doesn't re-hydrate from its own save
+  // when it hears its own BroadcastChannel message echoed back.
+  const instanceId =
+    typeof crypto !== "undefined" && crypto.randomUUID
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
+  // Set up below, once fn exists — declared here so persist() can safely
+  // reference it (only ever called after construction finishes).
+  let syncChannel = null;
+
+  // 🆕 Best-effort auto-save. Doesn't block or throw on the caller —
+  // storage errors (quota, adapter failure) go to onError like everything
+  // else, and never interrupt the actual state update.
+  const persist = () => {
+    if (!storeHistory || !persistKey || !persistStorage) return;
+    try {
+      const result = persistStorage.setItem(persistKey, fn.exportHistory());
+      const announce = () => {
+        if (syncChannel) {
+          syncChannel.postMessage({ source: instanceId, at: Date.now() });
+        }
+      };
+      if (result instanceof Promise) {
+        result.then(announce).catch((err) => {
+          if (onError) onError(err);
+        });
+      } else {
+        announce();
+      }
+    } catch (err) {
+      if (onError) onError(err);
+    }
+  };
+
+  const notifySubscribers = () => {
+    subscribers.forEach((cb) => cb());
+    if (onChange) {
+      try {
+        onChange(fn.value, storeHistory ? history[history.length - 1] : undefined);
+      } catch (err) {
+        if (onError) onError(err);
+      }
+    }
+    persist();
+  };
 
   const pushToHistory = (result) => {
     if (!storeHistory || historyPaused) return;
@@ -74,15 +343,16 @@ function Executor(callback, options = {}) {
         return;
     }
 
-    // 🔍 throttle
-    stepCounter++;
-    if (stepCounter % historyStep !== 0) return;
-
-    // 🔍 skip consecutive duplicates
+    // 🔍 skip consecutive duplicates (checked before the throttle counter
+    // so a skipped duplicate doesn't consume a historyStep "slot")
     if (equalityFn && history.length > 0) {
       const last = history[history.length - 1].value;
       if (equalityFn(result, last)) return;
     }
+
+    // 🔍 throttle
+    stepCounter++;
+    if (stepCounter % historyStep !== 0) return;
 
     // ✅ push with metadata + timestamp
     history.push({
@@ -112,10 +382,105 @@ function Executor(callback, options = {}) {
     }
   };
 
-  fn.value = initialValue;
+  fn.value = isSeeded ? currentValue : initialValue;
   fn.initialValue = initialValue;
   fn.history = history;
   fn.redoStack = redoStack;
+
+  // 🆕 Fix #2: always present, always safe to `await`, regardless of
+  // whether callNow's callback was sync or async — so call sites don't
+  // need to know or care which case they're in. Sync (or no callNow at
+  // all) resolves immediately with the current value. Async resolves once
+  // the value/history/subscribers have actually been committed.
+  fn.ready = persistLoadPromise
+    ? persistLoadPromise.then(async (found) => {
+        // No persisted data existed for this key — callNow was deferred
+        // (we couldn't know that synchronously with an async adapter), so
+        // run it now as a fallback.
+        if (!found && callNow) {
+          try {
+            const maybe = callback(...initialArgs);
+            const resolved = maybe instanceof Promise ? await maybe : maybe;
+            initialValue = resolved;
+            if (storeHistory) {
+              history.push({
+                value: deepClone(resolved),
+                meta: metadataFn?.(resolved),
+                group: groupBy?.(resolved),
+                _index: ++entryCounter,
+                _time: Date.now(),
+              });
+            }
+          } catch (err) {
+            if (onError) onError(err);
+            else throw err;
+          }
+        }
+        fn.value = isSeeded ? currentValue : initialValue;
+        fn.initialValue = initialValue;
+        notifySubscribers();
+        return fn.value;
+      })
+    : initPromise
+    ? initPromise
+        .then((resolved) => {
+          fn.value = resolved;
+          fn.initialValue = resolved;
+          if (storeHistory) {
+            history.push({
+              value: deepClone(resolved),
+              meta: metadataFn?.(resolved),
+              group: groupBy?.(resolved),
+              _index: ++entryCounter,
+              _time: Date.now(),
+            });
+          }
+          notifySubscribers();
+          return resolved;
+        })
+        .catch((err) => {
+          if (onError) onError(err);
+          throw err; // keep fn.ready rejected so an explicit awaiter can still catch it
+        })
+    : Promise.resolve(fn.value);
+
+  // 🆕 Cross-tab sync: when another tab/window saves new state for this
+  // persistKey, pull it in here too. Built on BroadcastChannel rather than
+  // the old `storage` event — that only fires for localStorage, and the
+  // default adapter is IndexedDB now, so it wouldn't fire at all.
+  if (storeHistory && persistKey && persistStorage && syncTabs) {
+    if (typeof BroadcastChannel === "undefined") {
+      if (onError) {
+        onError(
+          new Error(
+            "Executor: syncTabs requires BroadcastChannel, which isn't available in this environment"
+          )
+        );
+      }
+    } else {
+      syncChannel = new BroadcastChannel(`executor:${persistKey}`);
+      syncChannel.onmessage = (event) => {
+        if (!event.data || event.data.source === instanceId) return; // ignore our own writes
+        Promise.resolve(persistStorage.getItem(persistKey)).then((raw) => {
+          const data = parsePersisted(raw);
+          if (!data) return;
+          applyPersistedData(data);
+          fn.value = data.value;
+          fn.initialValue = data.initialValue;
+          notifySubscribers();
+        });
+      };
+    }
+  }
+
+  // 🆕 Stop listening for cross-tab updates (e.g. on component unmount).
+  // Safe to call even if syncTabs was never enabled.
+  fn.stopSync = () => {
+    if (syncChannel) {
+      syncChannel.close();
+      syncChannel = null;
+    }
+  };
 
   fn.log = () => console.log(fn.value);
 
@@ -187,10 +552,13 @@ function Executor(callback, options = {}) {
     if (!storeHistory)
       throw new Error("Executor: replaceAt requires storeHistory = true");
     if (index < 0 || index >= history.length) return fn.value;
+    const old = history[index];
     history[index] = {
       value: deepClone(newValue),
       meta: metadataFn?.(newValue),
       group: groupBy?.(newValue),
+      _index: old._index, // keep original position so default-order sort is unaffected
+      _time: Date.now(), // this entry was just edited, so update its timestamp
     };
     if (index === history.length - 1) fn.value = newValue;
     notifySubscribers();
@@ -279,6 +647,9 @@ function Executor(callback, options = {}) {
     // Reset redoStack
     redoStack.length = 0;
 
+    // Keep entryCounter ahead of the copied entries' _index values
+    resyncEntryCounter();
+
     // Update fn.value
     fn.value = history[history.length - 1]?.value ?? fn.initialValue;
 
@@ -346,6 +717,9 @@ function Executor(callback, options = {}) {
 
     // Reset redoStack
     redoStack.length = 0;
+
+    // Keep entryCounter ahead of the merged entries' _index values
+    resyncEntryCounter();
 
     // Update fn.value
     fn.value = history[history.length - 1]?.value ?? fn.initialValue;
@@ -453,14 +827,17 @@ function Executor(callback, options = {}) {
           _time: entry._time,
         }));
 
-      // Create a new Executor seeded with this subset
-      const mini = Executor(() => fn.initialValue, {
+      // Create a new Executor seeded with this subset, using the SAME
+      // callback as the parent — so a split executor is a genuinely live,
+      // independent executor (calling ex1(99) actually runs your logic on
+      // 99), not just a read-only viewer onto a slice of history. Seeding
+      // happens inside the constructor (see seedHistory above), so undo,
+      // redo, jumpTo, filterHistory, etc. all work correctly on `mini` too.
+      const mini = Executor(callback, {
         storeHistory: true,
         callNow: false,
+        seedHistory: subset,
       });
-
-      mini.history = subset;
-      mini.value = subset[subset.length - 1]?.value ?? fn.initialValue;
 
       result[`ex${i + 1}`] = mini;
     });
@@ -484,6 +861,7 @@ function Executor(callback, options = {}) {
       );
       fn.value = history[history.length - 1].value;
       redoStack.length = 0;
+      resyncEntryCounter();
       notifySubscribers();
     }
   };
@@ -547,6 +925,7 @@ function Executor(callback, options = {}) {
       }
 
       fn.value = deepClone(data.value ?? fn.initialValue);
+      resyncEntryCounter();
       notifySubscribers();
     } catch (e) {
       if (onError) onError(e);
@@ -618,6 +997,13 @@ function Executor(callback, options = {}) {
   fn._subscribe = (cb) => subscribers.add(cb);
   fn._unsubscribe = (cb) => subscribers.delete(cb);
 
+  // 🆕 Debug helpers — how many things are currently subscribed, and (for
+  // deeper inspection) the actual callback list. Useful once you're
+  // juggling many executors in a larger app and something isn't
+  // re-rendering the way you expect.
+  fn._subscriberCount = () => subscribers.size;
+  fn._debugSubscribers = () => Array.from(subscribers);
+
   // Extend filterHistory with common query helpers
   fn.filterHistory = (predicateOrOptions) => {
     if (!storeHistory) return [];
@@ -669,6 +1055,54 @@ function Executor(callback, options = {}) {
     });
   };
 
+  // 🆕 Read-only transform over history entries — doesn't mutate.
+  // e.g. ex.mapHistory((entry) => entry.value) to pull out just the values.
+  fn.mapHistory = (mapFn) => {
+    if (!storeHistory) return [];
+    return history.map((entry, i) => mapFn(entry, i));
+  };
+
+  // 🆕 In-place transform: mapFn receives (value, entry, index) and
+  // returns either a plain new value, or a { value, meta, group } shape to
+  // also update metadata/grouping. _index/_time are preserved either way,
+  // so sort("default") and time-based filterHistory queries stay correct.
+  fn.transformHistory = (mapFn) => {
+    if (!storeHistory) return fn.value;
+    for (let i = 0; i < history.length; i++) {
+      const entry = history[i];
+      const result = mapFn(entry.value, entry, i);
+      const isEntryShape =
+        result && typeof result === "object" && "value" in result;
+      history[i] = isEntryShape
+        ? {
+            value: deepClone(result.value),
+            meta: result.meta ?? entry.meta,
+            group: result.group ?? entry.group,
+            _index: entry._index,
+            _time: entry._time,
+          }
+        : {
+            ...entry,
+            value: deepClone(result),
+          };
+    }
+    fn.value = history[history.length - 1]?.value ?? fn.initialValue;
+    notifySubscribers();
+    return fn.value;
+  };
+
+  // 🆕 If we just established a fresh initial state (not loaded from a
+  // previous session, and not waiting on an async callNow) and persistence
+  // is configured, save that baseline immediately. Without this, the very
+  // first value set via a *synchronous* callNow was never persisted at
+  // all — persist() only ever ran off notifySubscribers, which the
+  // initial sync commit intentionally bypasses (same as it always has).
+  // This has to run down here, after every fn.* method — including
+  // fn.exportHistory, which persist() calls — actually exists.
+  if (storeHistory && persistKey && persistStorage && !loadedFromPersist && !persistLoadPromise && !initPromise) {
+    persist();
+  }
+
   return fn;
 }
 
@@ -697,6 +1131,21 @@ Executor.combine = (...executors) => {
   return group;
 };
 
+// 🆕 Snapshot the full state of any set of executors — independent of
+// combine(), and returns parsed objects (not JSON strings) so the result
+// is directly inspectable/diffable/sendable-over-the-wire as-is.
+Executor.snapshot = (...executors) => {
+  const list = Array.isArray(executors[0]) ? executors[0] : executors;
+  return list.map((ex) => JSON.parse(ex.exportHistory()));
+};
+
+Executor.restoreSnapshot = (executors, snapshot) => {
+  const list = Array.isArray(executors[0]) ? executors[0] : executors;
+  list.forEach((ex, i) => {
+    if (snapshot[i]) ex.importHistory(JSON.stringify(snapshot[i]));
+  });
+};
+
 // React Hook for auto re-rendering
 function useExecutor(executor, fullPower = false) {
   if (!executor || typeof executor !== "function") {
@@ -718,16 +1167,16 @@ function useExecutor(executor, fullPower = false) {
 export { Executor, useExecutor };
 export default Executor;
 
-// Later we can add performance optimizations for large histories
-// Later we can add a way to inspect current subscribers for debugging
-// Later we can add a way to filter or transform history entries on the fly
-// Later we can add a way to visualize history for better UX
-// Later we can add a way to log history changes for auditing
-// Later we can add a way to snapshot the entire state of multiple executors
-// Later we can add a way to persist history in localStorage or IndexedDB
-// Later we can add a way to sync history across multiple tabs or windows
-// Later we can add a way to handle circular references in history entries
-// Later we can add a way to profile performance of executor calls and history management
-// Later we can add a way to handle large data structures efficiently
-// Later we can add a way to visualize the call stack leading to each history entry
-// Later we can add a way to customize the initial state and behavior of the executor
+// ✅ Done: performance is left alone until a real workload needs it (historyStep/maxHistory exist for now)
+// ✅ Done: inspect current subscribers for debugging (_subscriberCount, _debugSubscribers)
+// ✅ Done: filter or transform history entries on the fly (filterHistory, mapHistory, transformHistory)
+// Later we can add a way to visualize history for better UX (build on filterHistory/serializeHistory, not in this lib)
+// ✅ Done: log history changes for auditing (onChange option)
+// ✅ Done: snapshot the entire state of multiple executors (Executor.snapshot / restoreSnapshot)
+// ✅ Done: persist history in localStorage or IndexedDB (persistKey / persistStorage options)
+// Later we can add a way to sync history across multiple tabs or windows (build on persistKey)
+// ✅ Done: handle circular references in history entries (deepClone uses a seen-set)
+// Later: profiling belongs in devtools, not baked into the library
+// Later we can add a way to handle large data structures efficiently (revisit alongside deepClone if it becomes a real bottleneck)
+// Later: call-stack visualization is an app built on top of this data, not this library's job
+// ✅ Done: customize the initial state and behavior of the executor (seedHistory / seedValue options)

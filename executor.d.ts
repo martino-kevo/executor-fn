@@ -62,6 +62,56 @@ export type ExecutorOptions<T> = {
      * @returns A string label for the group
      */
     groupBy?: (value: T) => string; // 🆕 categorize history entries
+
+    /**
+     * Pre-populate history at construction time instead of via calls.
+     * Used internally by split(); also available directly if you want to
+     * hydrate an executor from previously exported state without
+     * replaying calls. fn.value is set to the last entry, fn.initialValue
+     * (the reset() target) to the first entry unless seedValue overrides it.
+     */
+    seedHistory?: HistoryEntry<T>[];
+
+    /**
+     * Explicit initialValue / reset() target to pair with seedHistory.
+     * Defaults to seedHistory's first entry's value if omitted.
+     */
+    seedValue?: T;
+
+    /**
+     * If set, history auto-saves under this key and auto-restores on
+     * construction (taking priority over seedHistory/callNow when a saved
+     * session exists).
+     */
+    persistKey?: string;
+
+    /**
+     * Storage adapter for persistKey. Needs getItem(key) and
+     * setItem(key, value); either can return a value directly (localStorage)
+     * or a Promise (e.g. an IndexedDB wrapper) — both are supported.
+     * @default an IndexedDB-backed adapter, when IndexedDB is available
+     */
+    persistStorage?: {
+        getItem: (key: string) => string | null | undefined | Promise<string | null | undefined>;
+        setItem: (key: string, value: string) => void | Promise<void>;
+    };
+
+    /**
+     * If true (with persistKey set), mirror state changes across
+     * tabs/windows via BroadcastChannel — another tab's update is pulled
+     * in and subscribers are notified. Requires BroadcastChannel support.
+     * @default false
+     */
+    syncTabs?: boolean;
+
+    /**
+     * Called with the new value after every committed change (calls, undo,
+     * redo, reset, transformHistory, imports, ...). Useful for auditing /
+     * logging without needing to _subscribe manually.
+     * @param value The new current value
+     * @param entry The most recent history entry, if storeHistory is enabled
+     */
+    onChange?: (value: T, entry?: HistoryEntry<T>) => void;
 };
 
 // =========================
@@ -112,6 +162,16 @@ export type ExecutorInstance<T> = ((...args: any[]) => Promise<T>) & {
      * Property: the history if enabled
      */
     history?: HistoryEntry<T>[];
+
+    /**
+     * Property: resolves once the initial value is actually settled.
+     * Always present and always safe to await regardless of whether
+     * callNow's callback was sync or async — resolves immediately for
+     * sync (or no callNow), resolves once the commit completes for async.
+     * Rejects if an async callNow callback throws (onError, if provided,
+     * is also called).
+     */
+    ready: Promise<T>;
 
     /**
      * Property: redo stack for redo actions
@@ -288,6 +348,41 @@ export type ExecutorInstance<T> = ((...args: any[]) => Promise<T>) & {
      * @returns void
      */
     _unsubscribe(cb: () => void): void;
+    /**
+     * Debug helper: number of currently subscribed callbacks (e.g. mounted
+     * useExecutor() consumers)
+     * @returns Current subscriber count
+     */
+    _subscriberCount(): number;
+    /**
+     * Debug helper: the actual subscribed callback list
+     * @returns Array of subscribed callbacks
+     */
+    _debugSubscribers(): Array<() => void>;
+
+    /**
+     * Stop listening for cross-tab updates (relevant only if syncTabs was
+     * enabled). Safe to call even if it wasn't.
+     * @returns void
+     */
+    stopSync(): void;
+
+    /**
+     * Read-only transform over history entries — does not mutate
+     * @param mapFn Function receiving (entry, index)
+     * @returns Array of mapFn's results
+     */
+    mapHistory<R>(mapFn: (entry: HistoryEntry<T>, index: number) => R): R[];
+    /**
+     * In-place transform: replaces each entry's value (and optionally its
+     * meta/group) via mapFn. _index/_time are preserved.
+     * @param mapFn Function receiving (value, entry, index); return either
+     * a plain new value, or { value, meta?, group? } to also update metadata
+     * @returns The current value after transforming
+     */
+    transformHistory(
+        mapFn: (value: T, entry: HistoryEntry<T>, index: number) => T | { value: T; meta?: any; group?: string }
+    ): T;
 };
 
 // =========================
@@ -336,6 +431,24 @@ export namespace Executor {
      * @returns An ExecutorGroup with combined history methods
      */
     export function combine(...executors: ExecutorInstance<any>[]): ExecutorGroup;
+
+    /**
+     * Capture the full exported state of multiple executors as parsed
+     * objects (not JSON strings) — directly inspectable/diffable/sendable
+     * as-is.
+     * @param executors Executors to snapshot (spread args, or a single array)
+     * @returns One parsed export-state object per executor
+     */
+    export function snapshot(...executors: ExecutorInstance<any>[] | [ExecutorInstance<any>[]]): any[];
+
+    /**
+     * Restore a snapshot captured by Executor.snapshot back onto a matching
+     * list of executors, by position.
+     * @param executors Executors to restore into, in the same order as the snapshot
+     * @param snapshot The snapshot array returned by Executor.snapshot
+     * @returns void
+     */
+    export function restoreSnapshot(executors: ExecutorInstance<any>[], snapshot: any[]): void;
 }
 
 
