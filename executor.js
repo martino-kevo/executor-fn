@@ -62,13 +62,44 @@ function createIndexedDBStorage(dbName = "executor-store", storeName = "kv") {
     if (!dbPromise) {
       dbPromise = new Promise((resolve, reject) => {
         const req = indexedDB.open(dbName, 1);
+        let blockedTimer = null;
+
         req.onupgradeneeded = () => {
           if (!req.result.objectStoreNames.contains(storeName)) {
             req.result.createObjectStore(storeName);
           }
         };
-        req.onsuccess = () => resolve(req.result);
-        req.onerror = () => reject(req.error);
+        req.onsuccess = () => {
+          if (blockedTimer) clearTimeout(blockedTimer);
+          resolve(req.result);
+        };
+        req.onerror = () => {
+          if (blockedTimer) clearTimeout(blockedTimer);
+          reject(req.error);
+        };
+        // 🆕 Fires when another connection (e.g. another tab, with an
+        // older schema version open) blocks this upgrade — exactly the
+        // multi-tab situation syncTabs is built for. Without this handler
+        // the request just hangs forever with no resolution at all. Give
+        // it a window to clear on its own (the other tab finishes and
+        // closes), then fail loudly instead of hanging silently.
+        req.onblocked = () => {
+          if (blockedTimer) return; // already waiting
+          blockedTimer = setTimeout(() => {
+            reject(
+              new Error(
+                "Executor: IndexedDB open() was blocked by another connection (likely another tab with an older version open) and didn't clear within 5s"
+              )
+            );
+          }, 5000);
+        };
+      });
+
+      // Don't cache a permanently-rejected promise — if opening the DB
+      // failed, let the next getItem/setItem call try again rather than
+      // being stuck forever on one failed attempt.
+      dbPromise.catch(() => {
+        dbPromise = null;
       });
     }
     return dbPromise;
@@ -82,6 +113,11 @@ function createIndexedDBStorage(dbName = "executor-store", storeName = "kv") {
         const req = tx.objectStore(storeName).get(key);
         req.onsuccess = () => resolve(req.result);
         req.onerror = () => reject(req.error);
+        // 🆕 A transaction can abort (e.g. quota errors) without always
+        // firing onerror in every browser — this is a safety net so the
+        // promise doesn't hang if that happens. Safe to have both; a
+        // settled promise ignores any later resolve/reject.
+        tx.onabort = () => reject(tx.error || new Error("Executor: IndexedDB read transaction aborted"));
       });
     },
     async setItem(key, value) {
@@ -91,6 +127,7 @@ function createIndexedDBStorage(dbName = "executor-store", storeName = "kv") {
         tx.objectStore(storeName).put(value, key);
         tx.oncomplete = () => resolve();
         tx.onerror = () => reject(tx.error);
+        tx.onabort = () => reject(tx.error || new Error("Executor: IndexedDB write transaction aborted"));
       });
     },
   };
@@ -127,6 +164,82 @@ function Executor(callback, options = {}) {
   const subscribers = new Set();
   let historyPaused = false;
   let stepCounter = 0; // for historyStep
+
+  // 🆕 Central "auxiliary" error dispatch — for things that must never
+  // crash the caller (subscriber callbacks, metadataFn/groupBy/equalityFn,
+  // persistence, cross-tab sync). Never throws, even if onError itself has
+  // a bug — falls back to console.error so failures are never silently
+  // invisible, whether or not onError is configured.
+  const reportError = (err) => {
+    if (onError) {
+      try {
+        onError(err);
+        return;
+      } catch (handlerErr) {
+        console.error("Executor: onError handler threw", handlerErr);
+      }
+    }
+    console.error("Executor:", err);
+  };
+
+  // For the executor's actual callback (the real computation) — an error
+  // here is a bug in the caller's own logic, so with no onError configured
+  // the default is still to throw, same as before. This just also guards
+  // against onError itself throwing, degrading to the original error
+  // instead of a confusing new one.
+  const runOnErrorOrThrow = (err) => {
+    if (onError) {
+      try {
+        onError(err);
+        return;
+      } catch (handlerErr) {
+        console.error(
+          "Executor: onError handler threw while handling an error",
+          handlerErr
+        );
+        throw err; // onError failed to handle it — surface the original error
+      }
+    }
+    throw err;
+  };
+
+  // 🆕 metadataFn/groupBy/equalityFn are user-supplied and get invoked from
+  // many places (pushToHistory, reset, clearHistory, insertAt, copy, merge,
+  // sort, replaceAt...) — previously only the copy invoked from inside
+  // fn() was protected by a try/catch. A bug in any of these triggered via
+  // .undo()/.reset()/etc used to crash uncaught. These wrappers make every
+  // call site safe without changing behavior when the callbacks are fine.
+  const safeMetadataFn = (value) => {
+    if (!metadataFn) return undefined;
+    try {
+      return metadataFn(value);
+    } catch (err) {
+      reportError(err);
+      return undefined;
+    }
+  };
+
+  const safeGroupBy = (value) => {
+    if (!groupBy) return undefined;
+    try {
+      return groupBy(value);
+    } catch (err) {
+      reportError(err);
+      return undefined;
+    }
+  };
+
+  const safeEqualityFn = (a, b) => {
+    if (!equalityFn) return false;
+    try {
+      return equalityFn(a, b);
+    } catch (err) {
+      reportError(err);
+      // A failed comparison is treated as "not equal" — safer default than
+      // silently treating everything as a duplicate and losing entries.
+      return false;
+    }
+  };
 
   let initialValue;
   let currentValue; // set when seeding — the "current" state differs from the reset target
@@ -170,7 +283,7 @@ function Executor(callback, options = {}) {
     try {
       return JSON.parse(raw);
     } catch (err) {
-      if (onError) onError(err);
+      reportError(err);
       return null;
     }
   };
@@ -225,7 +338,7 @@ function Executor(callback, options = {}) {
         loadedFromPersist = hydrateFromPersisted(maybeSaved);
       }
     } catch (err) {
-      if (onError) onError(err);
+      reportError(err);
     }
   }
 
@@ -270,8 +383,8 @@ function Executor(callback, options = {}) {
         if (storeHistory) {
           history.push({
             value: deepClone(initialValue),
-            meta: metadataFn?.(initialValue),
-            group: groupBy?.(initialValue),
+            meta: safeMetadataFn(initialValue),
+            group: safeGroupBy(initialValue),
             _index: ++entryCounter, // new insertion index
             _time: Date.now(), // new timestamp
           });
@@ -279,8 +392,7 @@ function Executor(callback, options = {}) {
       }
     }
   } catch (err) {
-    if (onError) onError(err);
-    else throw err;
+    runOnErrorOrThrow(err);
   }
 
   // 🆕 Unique per-instance id so a tab doesn't re-hydrate from its own save
@@ -308,23 +420,38 @@ function Executor(callback, options = {}) {
       };
       if (result instanceof Promise) {
         result.then(announce).catch((err) => {
-          if (onError) onError(err);
+          reportError(err);
         });
       } else {
         announce();
       }
     } catch (err) {
-      if (onError) onError(err);
+      reportError(err);
     }
   };
 
   const notifySubscribers = () => {
-    subscribers.forEach((cb) => cb());
+    // 🆕 Fix: each subscriber is called independently. Previously one
+    // throwing subscriber stopped the forEach dead — later subscribers
+    // never got notified, and since most callers of notifySubscribers()
+    // (undo, redo, reset, insertAt, sort, copy, merge, transformHistory...)
+    // have no try/catch of their own, the throw propagated all the way up
+    // and crashed whatever called them. In a big app with many components
+    // subscribed via useExecutor, or a game with many systems listening to
+    // shared state, one bad listener used to be able to take everything
+    // downstream of it out.
+    subscribers.forEach((cb) => {
+      try {
+        cb();
+      } catch (err) {
+        reportError(err);
+      }
+    });
     if (onChange) {
       try {
         onChange(fn.value, storeHistory ? history[history.length - 1] : undefined);
       } catch (err) {
-        if (onError) onError(err);
+        reportError(err);
       }
     }
     persist();
@@ -335,7 +462,7 @@ function Executor(callback, options = {}) {
 
     // 🔍 noDuplicate checks
     if (noDuplicate && equalityFn) {
-      if (history.some((h) => equalityFn(h.value, result))) return;
+      if (history.some((h) => safeEqualityFn(h.value, result))) return;
     } else if (noDuplicate) {
       if (
         history.some((h) => JSON.stringify(h.value) === JSON.stringify(result))
@@ -347,7 +474,7 @@ function Executor(callback, options = {}) {
     // so a skipped duplicate doesn't consume a historyStep "slot")
     if (equalityFn && history.length > 0) {
       const last = history[history.length - 1].value;
-      if (equalityFn(result, last)) return;
+      if (safeEqualityFn(result, last)) return;
     }
 
     // 🔍 throttle
@@ -357,8 +484,8 @@ function Executor(callback, options = {}) {
     // ✅ push with metadata + timestamp
     history.push({
       value: deepClone(result),
-      meta: metadataFn?.(result),
-      group: groupBy?.(result),
+      meta: safeMetadataFn(result),
+      group: safeGroupBy(result),
       _index: ++entryCounter, // new insertion index
       _time: Date.now(), // new timestamp
     });
@@ -377,8 +504,7 @@ function Executor(callback, options = {}) {
       notifySubscribers();
       return result;
     } catch (err) {
-      if (onError) onError(err);
-      else throw err;
+      runOnErrorOrThrow(err);
     }
   };
 
@@ -405,15 +531,14 @@ function Executor(callback, options = {}) {
             if (storeHistory) {
               history.push({
                 value: deepClone(resolved),
-                meta: metadataFn?.(resolved),
-                group: groupBy?.(resolved),
+                meta: safeMetadataFn(resolved),
+                group: safeGroupBy(resolved),
                 _index: ++entryCounter,
                 _time: Date.now(),
               });
             }
           } catch (err) {
-            if (onError) onError(err);
-            else throw err;
+            runOnErrorOrThrow(err);
           }
         }
         fn.value = isSeeded ? currentValue : initialValue;
@@ -429,8 +554,8 @@ function Executor(callback, options = {}) {
           if (storeHistory) {
             history.push({
               value: deepClone(resolved),
-              meta: metadataFn?.(resolved),
-              group: groupBy?.(resolved),
+              meta: safeMetadataFn(resolved),
+              group: safeGroupBy(resolved),
               _index: ++entryCounter,
               _time: Date.now(),
             });
@@ -439,7 +564,11 @@ function Executor(callback, options = {}) {
           return resolved;
         })
         .catch((err) => {
-          if (onError) onError(err);
+          try {
+            if (onError) onError(err);
+          } catch (handlerErr) {
+            console.error("Executor: onError handler threw", handlerErr);
+          }
           throw err; // keep fn.ready rejected so an explicit awaiter can still catch it
         })
     : Promise.resolve(fn.value);
@@ -450,25 +579,30 @@ function Executor(callback, options = {}) {
   // default adapter is IndexedDB now, so it wouldn't fire at all.
   if (storeHistory && persistKey && persistStorage && syncTabs) {
     if (typeof BroadcastChannel === "undefined") {
-      if (onError) {
-        onError(
-          new Error(
-            "Executor: syncTabs requires BroadcastChannel, which isn't available in this environment"
-          )
-        );
-      }
+      reportError(
+        new Error(
+          "Executor: syncTabs requires BroadcastChannel, which isn't available in this environment"
+        )
+      );
     } else {
       syncChannel = new BroadcastChannel(`executor:${persistKey}`);
       syncChannel.onmessage = (event) => {
         if (!event.data || event.data.source === instanceId) return; // ignore our own writes
-        Promise.resolve(persistStorage.getItem(persistKey)).then((raw) => {
-          const data = parsePersisted(raw);
-          if (!data) return;
-          applyPersistedData(data);
-          fn.value = data.value;
-          fn.initialValue = data.initialValue;
-          notifySubscribers();
-        });
+        Promise.resolve(persistStorage.getItem(persistKey))
+          .then((raw) => {
+            const data = parsePersisted(raw);
+            if (!data) return;
+            applyPersistedData(data);
+            fn.value = data.value;
+            fn.initialValue = data.initialValue;
+            notifySubscribers();
+          })
+          .catch((err) => {
+            // 🆕 Without this, a failure here (e.g. persistStorage.getItem
+            // rejecting) was a silent unhandled promise rejection with no
+            // route to onError at all.
+            reportError(err);
+          });
       };
     }
   }
@@ -492,8 +626,8 @@ function Executor(callback, options = {}) {
       history.length = 0;
       history.push({
         value: deepClone(fn.initialValue),
-        meta: metadataFn?.(fn.initialValue),
-        group: groupBy?.(fn.initialValue),
+        meta: safeMetadataFn(fn.initialValue),
+        group: safeGroupBy(fn.initialValue),
         _index: ++entryCounter,
         _time: Date.now(),
       });
@@ -539,8 +673,15 @@ function Executor(callback, options = {}) {
 
   // Jump to specific history entry
   fn.jumpTo = (index) => {
-    if (!storeHistory)
-      throw new Error("Executor: jumpTo requires storeHistory = true");
+    if (!storeHistory) {
+      // 🆕 Previously threw a plain Error here — inconsistent with
+      // undo/redo/removeAt/insertAt, which already silently no-op in the
+      // equivalent situation. In a hot path (a game's per-frame update) an
+      // uncaught throw here could crash the frame; now it's reported
+      // (onError, or console.error as a fallback) instead.
+      reportError(new Error("Executor: jumpTo requires storeHistory = true"));
+      return fn.value;
+    }
     if (index < 0 || index >= history.length) return fn.value;
     fn.value = history[index].value;
     notifySubscribers();
@@ -549,14 +690,17 @@ function Executor(callback, options = {}) {
 
   // Replace specific history entry
   fn.replaceAt = (index, newValue) => {
-    if (!storeHistory)
-      throw new Error("Executor: replaceAt requires storeHistory = true");
+    if (!storeHistory) {
+      // 🆕 Same consistency fix as jumpTo above.
+      reportError(new Error("Executor: replaceAt requires storeHistory = true"));
+      return fn.value;
+    }
     if (index < 0 || index >= history.length) return fn.value;
     const old = history[index];
     history[index] = {
       value: deepClone(newValue),
-      meta: metadataFn?.(newValue),
-      group: groupBy?.(newValue),
+      meta: safeMetadataFn(newValue),
+      group: safeGroupBy(newValue),
       _index: old._index, // keep original position so default-order sort is unaffected
       _time: Date.now(), // this entry was just edited, so update its timestamp
     };
@@ -570,8 +714,8 @@ function Executor(callback, options = {}) {
     if (storeHistory && index >= 0 && index <= history.length) {
       history.splice(index, 0, {
         value: deepClone(newValue),
-        meta: metadataFn?.(newValue),
-        group: groupBy?.(newValue),
+        meta: safeMetadataFn(newValue),
+        group: safeGroupBy(newValue),
         _index: ++entryCounter,
         _time: Date.now(),
       });
@@ -587,8 +731,8 @@ function Executor(callback, options = {}) {
       history.length = 0;
       history.push({
         value: deepClone(fn.value),
-        meta: metadataFn?.(fn.value),
-        group: groupBy?.(fn.value),
+        meta: safeMetadataFn(fn.value),
+        group: safeGroupBy(fn.value),
         _index: entryCounter,
         _time: Date.now(),
       });
@@ -614,7 +758,7 @@ function Executor(callback, options = {}) {
 
           // noDuplicate + equalityFn
           if (noDuplicate && equalityFn) {
-            if (copied.some((e) => equalityFn(e.value, val))) return;
+            if (copied.some((e) => safeEqualityFn(e.value, val))) return;
           } else if (noDuplicate) {
             if (
               copied.some(
@@ -673,8 +817,8 @@ function Executor(callback, options = {}) {
 
           // noDuplicate + equalityFn
           if (noDuplicate && equalityFn) {
-            if (history.some((e) => equalityFn(e.value, val))) return;
-            if (merged.some((e) => equalityFn(e.value, val))) return;
+            if (history.some((e) => safeEqualityFn(e.value, val))) return;
+            if (merged.some((e) => safeEqualityFn(e.value, val))) return;
           } else if (noDuplicate) {
             if (
               history.some(
@@ -771,7 +915,7 @@ function Executor(callback, options = {}) {
     sorted.forEach((entry) => {
       const val = entry.value;
       if (noDuplicate && equalityFn) {
-        if (deduped.some((e) => equalityFn(e.value, val))) return;
+        if (deduped.some((e) => safeEqualityFn(e.value, val))) return;
       } else if (noDuplicate) {
         if (
           deduped.some((e) => JSON.stringify(e.value) === JSON.stringify(val))
@@ -888,8 +1032,7 @@ function Executor(callback, options = {}) {
         })),
       });
     } catch (e) {
-      if (onError) onError(e);
-      else throw e;
+      runOnErrorOrThrow(e);
     }
   };
 
@@ -928,13 +1071,29 @@ function Executor(callback, options = {}) {
       resyncEntryCounter();
       notifySubscribers();
     } catch (e) {
-      if (onError) onError(e);
-      else throw e;
+      runOnErrorOrThrow(e);
     }
   };
 
   // 🆕 Export history to a downloadable JSON file
   fn.exportHistoryToFile = (filename = "executor-history.json") => {
+    if (
+      typeof document === "undefined" ||
+      typeof Blob === "undefined" ||
+      typeof URL === "undefined"
+    ) {
+      // 🆕 Previously this would fail with a cryptic "document is not
+      // defined" ReferenceError in non-browser environments (a Node game
+      // server, React Native, a restricted engine WebView). Fail with a
+      // clear, actionable message instead.
+      runOnErrorOrThrow(
+        new Error(
+          "Executor: exportHistoryToFile requires a browser environment (document/Blob/URL) and isn't available here"
+        )
+      );
+      return;
+    }
+
     const json = fn.exportHistory(); // uses the safe version we wrote
     const blob = new Blob([json], { type: "application/json" });
     const url = URL.createObjectURL(blob);
@@ -951,6 +1110,20 @@ function Executor(callback, options = {}) {
 
   // 🆕 Import history from a user-selected JSON file
   fn.importHistoryFromFile = () => {
+    if (typeof document === "undefined") {
+      // Keep the same "always returns a Promise" contract even in this
+      // early-exit case, so callers can always .catch() it uniformly.
+      const err = new Error(
+        "Executor: importHistoryFromFile requires a browser environment (document) and isn't available here"
+      );
+      try {
+        if (onError) onError(err);
+      } catch (handlerErr) {
+        console.error("Executor: onError handler threw", handlerErr);
+      }
+      return Promise.reject(err);
+    }
+
     return new Promise((resolve, reject) => {
       const input = document.createElement("input");
       input.type = "file";
@@ -965,10 +1138,15 @@ function Executor(callback, options = {}) {
           fn.importHistory(text); // reuse safe import
           resolve(fn.value);
         } catch (e) {
-          if (onError) onError(e);
+          try {
+            if (onError) onError(e);
+          } catch (handlerErr) {
+            console.error("Executor: onError handler threw", handlerErr);
+          }
           reject(e);
         }
       };
+
 
       input.click();
     });
@@ -978,10 +1156,27 @@ function Executor(callback, options = {}) {
   fn.batch = (callback) => {
     if (!storeHistory) return callback();
     historyPaused = true;
-    const result = callback();
-    historyPaused = false;
-    pushToHistory(fn.value);
-    notifySubscribers();
+    let result;
+    let succeeded = false;
+    try {
+      // 🆕 Error-handling fix: previously, if `callback` threw partway through,
+      // historyPaused = false below never ran — history tracking silently
+      // and permanently disabled itself for the rest of this executor's
+      // life, with no crash and no error to notice. The try/finally here
+      // guarantees historyPaused always gets reset, success or failure.
+      result = callback();
+      succeeded = true;
+    } catch (err) {
+      runOnErrorOrThrow(err);
+    } finally {
+      historyPaused = false;
+    }
+    // Only commit a combined history entry if the batch actually completed
+    // — a partial/interrupted batch shouldn't leave a checkpoint behind.
+    if (succeeded) {
+      pushToHistory(fn.value);
+      notifySubscribers();
+    }
     return result;
   };
 
@@ -1123,9 +1318,28 @@ Executor.combine = (...executors) => {
         "ExecutorGroup.importAll expects an array of JSON strings"
       );
     }
+    const failures = [];
     executors.forEach((fn, i) => {
-      if (dataArr[i]) fn.importHistory(dataArr[i]);
+      if (!dataArr[i]) return;
+      try {
+        fn.importHistory(dataArr[i]);
+      } catch (err) {
+        // fn.importHistory only throws here if that executor has no
+        // onError configured (or its own onError itself failed). Collect
+        // it and keep going, so one bad entry can't prevent the rest of
+        // the group from being restored.
+        failures.push({ index: i, error: err });
+      }
     });
+    if (failures.length) {
+      const summary = new Error(
+        `ExecutorGroup.importAll: ${failures.length} of ${executors.length} executor(s) failed to import (indices: ${failures
+          .map((f) => f.index)
+          .join(", ")})`
+      );
+      summary.failures = failures;
+      throw summary;
+    }
   };
 
   return group;

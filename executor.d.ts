@@ -205,7 +205,9 @@ export type ExecutorInstance<T> = ((...args: any[]) => Promise<T>) & {
      * Jump to a specific history index value
      * @param index Index in history to jump to
      * @returns The value at that history index or current value 
-     * if out of / below bounds
+     * if out of / below bounds. If storeHistory is false, reports via
+     * onError (or console.error as a fallback) and returns the current
+     * value, rather than throwing — consistent with undo/redo/etc.
      */
     jumpTo(index: number): T | undefined;
     /**
@@ -213,7 +215,9 @@ export type ExecutorInstance<T> = ((...args: any[]) => Promise<T>) & {
      * @param index Index in history to replace
      * @param newValue The new value to set at that index
      * @returns The replaced value or current value 
-     * if out of / below bounds
+     * if out of / below bounds. If storeHistory is false, reports via
+     * onError (or console.error as a fallback) and returns the current
+     * value, rather than throwing — consistent with undo/redo/etc.
      */
     replaceAt(index: number, newValue: T): T | undefined;
     /**
@@ -261,10 +265,13 @@ export type ExecutorInstance<T> = ((...args: any[]) => Promise<T>) & {
      * Download the current history on computer as a JSON file
      * @param filename Optional filename for the downloaded history file (default "executor-history.json")
      * @returns void
+     * @throws (or reports via onError) if called outside a browser environment (no document/Blob/URL)
      */
     exportHistoryToFile(filename?: string): void;
     /**
      * Open a file dialog to select a JSON file and restore history from it
+     * Rejects (with a clear message, reported via onError too) if called
+     * outside a browser environment (no document)
      * @returns Promise that resolves to the current value after import
      */
     importHistoryFromFile(): Promise<T>;
@@ -420,6 +427,10 @@ export type ExecutorGroup = {
     reset(): any[];        // same
     clearHistory(): any[];        // same
     export(): string[];    // JSON dumps from each executor
+    // Attempts every executor even if one fails (best-effort, not
+    // all-or-nothing). If any failed, throws one summary Error at the end
+    // with a `.failures: { index: number, error: unknown }[]` property —
+    // by which point every executor that *could* be restored already was.
     importAll(dataArr: string[]): void; // safer than "import"
 };
 
