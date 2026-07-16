@@ -1,5 +1,4 @@
 // executor.js
-import { useSyncExternalStore } from "react";
 
 // Deep clone utility to avoid reference issues in history.
 // `seen` tracks objects already cloned in this call so circular references
@@ -1360,25 +1359,8 @@ Executor.restoreSnapshot = (executors, snapshot) => {
   });
 };
 
-// React Hook for auto re-rendering
-function useExecutor(executor, fullPower = false) {
-  if (!executor || typeof executor !== "function") {
-    throw new Error("useExecutor: must receive a valid Executor instance");
-  }
-
-  useSyncExternalStore(
-    (subscribe) => {
-      executor._subscribe(subscribe);
-      return () => executor._unsubscribe(subscribe);
-    },
-    () => executor.value
-  );
-
-  return !fullPower ? executor.value : executor; // return full executor (value + methods) if requested
-}
-
 // ✅ Export both default and named
-export { Executor, useExecutor };
+export { Executor };
 export default Executor;
 
 // ✅ Done: performance is left alone until a real workload needs it (historyStep/maxHistory exist for now)
@@ -1388,7 +1370,7 @@ export default Executor;
 // ✅ Done: log history changes for auditing (onChange option)
 // ✅ Done: snapshot the entire state of multiple executors (Executor.snapshot / restoreSnapshot)
 // ✅ Done: persist history in localStorage or IndexedDB (persistKey / persistStorage options)
-// Later we can add a way to sync history across multiple tabs or windows (build on persistKey)
+// ✅ Done: sync history across multiple tabs or windows (syncTabs option, built on persistKey via BroadcastChannel)
 // ✅ Done: handle circular references in history entries (deepClone uses a seen-set)
 // Later: profiling belongs in devtools, not baked into the library
 // Later we can add a way to handle large data structures efficiently (revisit alongside deepClone if it becomes a real bottleneck)

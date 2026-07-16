@@ -408,17 +408,6 @@ export function Executor<T>(
 ): ExecutorInstance<T>;
 
 // =========================
-// React hook integration
-// =========================
-/**
- * React hook to use an Executor instance and auto re-render on value changes
- * @param executor An Executor instance created by the Executor function
- * @param fullPower Optionally return the full Executor instance with methods instead of just the value
- * @returns The current value managed by the executor or the full Executor instance if fullPower is true
- */
-export function useExecutor<T>(executor: ExecutorInstance<T>, fullPower?: boolean): T | ExecutorInstance<T>;
-
-// =========================
 // Combine multiple executors into one group
 // =========================
 export type ExecutorGroup = {
