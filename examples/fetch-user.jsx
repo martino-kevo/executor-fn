@@ -1,5 +1,6 @@
 import React, { useEffect } from "react";
-import { Executor, useExecutor } from "executor-fn";
+import { Executor } from "executor-fn";
+import { useExecutor } from "executor-fn/react";
 
 // --- store.js ---
 export const userStore = Executor((data) => data, {
@@ -9,6 +10,10 @@ export const userStore = Executor((data) => data, {
 
 // --- DebugPanel.jsx ---
 function DebugPanel({ store }) {
+    // .history is an array of entries ({ value, meta, group, _index, _time }),
+    // not raw values — pull out just the values for a readable display.
+    const values = store.history?.map((entry) => entry.value) ?? [];
+
     return (
         <div style={{
             marginTop: "1rem",
@@ -20,11 +25,16 @@ function DebugPanel({ store }) {
         }}>
             <h4>🕒 Time Travel Debug</h4>
             <p><strong>Current Value:</strong> {JSON.stringify(store.value)}</p>
-            <p><strong>History:</strong> {JSON.stringify(store.history)}</p>
+            <p><strong>History:</strong> {JSON.stringify(values)}</p>
 
             <div style={{ display: "flex", gap: "0.5rem", marginTop: "0.5rem" }}>
-                <button onClick={store.undo}>⏪ Undo</button>
-                <button onClick={store.redo}>⏩ Redo</button>
+                {/* undo/redo take an optional `steps` argument — passing them
+                    directly as onClick would hand React's SyntheticEvent to
+                    `steps`, which silently breaks the internal loop and makes
+                    the button do nothing. Always wrap in an arrow function. */}
+                <button onClick={() => store.undo()}>⏪ Undo</button>
+                <button onClick={() => store.redo()}>⏩ Redo</button>
+                {/* reset() takes no arguments, so passing it directly is safe */}
                 <button onClick={store.reset}>🔄 Reset</button>
             </div>
         </div>
@@ -40,7 +50,7 @@ export default function UserComponent() {
         async function fetchUser() {
             const res = await fetch("/api/user");
             const data = await res.json();
-            userStore(data); // update store, trigger re-render
+            await userStore(data); // update store, trigger re-render
         }
 
         fetchUser();
@@ -50,7 +60,9 @@ export default function UserComponent() {
 
     return (
         <div style={{ fontFamily: "sans-serif", maxWidth: "500px", margin: "auto" }}>
-            {/* Test user.name OR user.value.name to see which works */}
+            {/* useExecutor(userStore) returns userStore.value directly (not
+                the executor instance), so `user` IS the fetched data — use
+                user.name / user.email, not user.value.name. */}
             <h2>Welcome, {user?.name} 👋</h2>
             <p>Email: {user?.email}</p>
 

@@ -1,5 +1,20 @@
 import React, { useState } from "react";
-import { Executor, useExecutor } from "executor-fn"; // your lib
+import { Executor } from "executor-fn";
+import { useExecutor } from "executor-fn/react";
+
+// ⚠️ Executor calls and executor construction belong OUTSIDE the
+// component body (module scope, or behind a run-once guard). The
+// original version of this file called `numberExec(v)` directly inside
+// the component function — which React calls on every render. Since
+// numberExec has a subscriber (via useExecutor below), every one of those
+// calls notifies the subscriber, which forces ANOTHER render, which
+// preloads again... an infinite render loop ("Maximum update depth
+// exceeded" in real React). It also recreated `otherExec` from scratch on
+// every render, silently discarding any state it had accumulated from
+// earlier merges.
+//
+// Fix: create both executors at module scope, and guard the preload so it
+// only ever runs once, no matter how many times the component re-renders.
 
 // Executor that groups numbers into "small" or "large"
 const numberExec = Executor((x) => x, {
@@ -7,18 +22,18 @@ const numberExec = Executor((x) => x, {
   groupBy: (val) => (val < 50 ? "small" : "large"),
 });
 
+// Another executor to merge in
+const otherExec = Executor((x) => x, {
+  storeHistory: true,
+  groupBy: (val) => (val % 2 === 0 ? "even" : "odd"),
+});
+
+// Preload once, at module load time — not on every render.
+[10, 25, 75, 100].forEach((v) => numberExec(v));
+[5, 20, 60].forEach((v) => otherExec(v));
+
 export default function ExecutorAdvanced() {
   const state = useExecutor(numberExec);
-
-  // preload some values
-  [10, 25, 75, 100].forEach((v) => numberExec(v));
-
-  // Another executor to merge in
-  const otherExec = Executor((x) => x, {
-    storeHistory: true,
-    groupBy: (val) => (val % 2 === 0 ? "even" : "odd"),
-  });
-  [5, 20, 60].forEach((v) => otherExec(v));
 
   const [filterGroup, setFilterGroup] = useState("all");
   const [sortDir, setSortDir] = useState("asc");

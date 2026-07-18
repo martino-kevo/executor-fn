@@ -1,16 +1,29 @@
 import React from "react";
-import { Executor, useExecutor } from "executor-fn";
+import { Executor } from "executor-fn";
+import { useExecutor } from "executor-fn/react";
 
 // ✅ Example: Counter with most options enabled
+//
+// The original callback here read `counter.value` on itself:
+//   (step = 1) => (counter.value ?? 0) + step
+// With callNow: true and a SYNCHRONOUS callback, Executor invokes the
+// callback immediately as part of constructing `counter` — before the
+// `const counter = ...` assignment has actually completed. Reading
+// `counter` at that point hits JS's temporal dead zone and throws
+// "Cannot access 'counter' before initialization", crashing on load.
+// (This exact self-reference pattern DOES work elsewhere in these
+// examples, but only when the callback is async — the `await` inside it
+// defers the read until after `const counter = ...` has finished.)
+// The standard accumulator pattern avoids the self-reference entirely.
 const counter = Executor(
-  (step = 1) => {
+  (count, step = 1) => {
     if (step === "error") throw new Error("Manual error triggered!");
-    return (counter.value ?? 0) + step;
+    return count + step;
   },
   {
     // Most options enabled for demonstration but are fully optional
     storeHistory: true,
-    initialArgs: [0],
+    initialArgs: [0, 0],
     callNow: true,
     maxHistory: 5,
     equalityFn: (a, b) => a === b, // don't store duplicate values
@@ -19,19 +32,19 @@ const counter = Executor(
 );
 
 export default function App() {
-  const count = useExecutor(counter, true);
+  const count = useExecutor(counter);
 
   return (
     <div style={styles.container}>
       <h1>⚡ Executor Demo</h1>
 
       <p>
-        Current Value: <strong>{count.value}</strong>
+        Current Value: <strong>{count}</strong>
       </p>
 
       <div style={styles.buttonRow}>
-        <button onClick={() => counter(1)}>+1</button>
-        <button onClick={() => counter(-1)}>-1</button>
+        <button onClick={() => counter(count, 1)}>+1</button>
+        <button onClick={() => counter(count, -1)}>-1</button>
         <button onClick={() => counter.reset()}>Reset</button>
       </div>
 
@@ -41,7 +54,7 @@ export default function App() {
       </div>
 
       <div style={styles.buttonRow}>
-        <button onClick={() => counter("error")}>Trigger Error</button>
+        <button onClick={() => counter(count, "error")}>Trigger Error</button>
         <button
           onClick={() => {
             console.log("Serialized History:", counter.serializeHistory());

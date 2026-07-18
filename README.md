@@ -279,3 +279,9 @@ What started as a moment of curiosity became a polished, production-ready tool t
 Executor is my way of saying:
 
 "State management doesn't have to be complicated — and sometimes the best tools are born from curiosity, prayer, and collaboration."
+
+Also by me: [**biscuit-cache-js**](https://www.npmjs.com/package/biscuit-cache-js) — a persistent, reactive browser cache with background refresh and cross-tab sync.
+
+## 📜 License
+
+MIT © Martins Kelvin

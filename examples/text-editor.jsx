@@ -4,7 +4,10 @@ import { Executor } from "executor-fn";
 const editor = Executor((_, newValue) => newValue, {
   storeHistory: true,
   callNow: true,
-  initialArgs: [""],
+  initialArgs: ["", ""], // both positions — a single-element initialArgs
+  // left newValue as undefined, so editor.value started as undefined
+  // instead of "" (React then warns about switching an input from
+  // uncontrolled to controlled once a real string comes in).
 });
 
 export default function TextEditorApp() {
@@ -37,7 +40,10 @@ export default function TextEditorApp() {
         </button>
 
         <button
-          disabled={!editor.redo || editor.history.length === 0}
+          // editor.redo is always a function reference (truthy), so
+          // `!editor.redo` never actually reflects whether there's
+          // anything TO redo — check the redoStack itself instead.
+          disabled={!editor.redoStack?.length}
           onClick={() => {
             editor.redo();
             updateUI();

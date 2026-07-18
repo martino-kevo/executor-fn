@@ -1,5 +1,6 @@
 import React from "react";
-import { Executor, useExecutor } from "executor-fn";
+import { Executor } from "executor-fn";
+import { useExecutor } from "executor-fn/react";
 
 // --- themeStore.js ---
 export const themeStore = Executor((theme) => theme, {
@@ -38,8 +39,12 @@ function ThemeSwitcher() {
             <div style={{ marginTop: "1rem", display: "flex", gap: "0.5rem", justifyContent: "center" }}>
                 <button onClick={() => themeStore("light")}>Light</button>
                 <button onClick={() => themeStore("dark")}>Dark</button>
-                <button onClick={themeStore.undo}>⏪ Undo</button>
-                <button onClick={themeStore.redo}>⏩ Redo</button>
+                {/* undo/redo take an optional `steps` argument — passing them
+                    directly as onClick would hand React's SyntheticEvent to
+                    `steps`, silently breaking the internal loop so the
+                    button would do nothing. */}
+                <button onClick={() => themeStore.undo()}>⏪ Undo</button>
+                <button onClick={() => themeStore.redo()}>⏩ Redo</button>
             </div>
         </div>
     );

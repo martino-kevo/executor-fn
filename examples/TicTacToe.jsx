@@ -1,5 +1,6 @@
 import React, { useState } from "react";
-import { Executor, useExecutor } from "executor-fn"; // adjust import path
+import { Executor } from "executor-fn";
+import { useExecutor } from "executor-fn/react";
 
 // Initial empty Tic-Tac-Toe board
 const initialBoard = Array(9).fill("");
@@ -7,6 +8,11 @@ const initialBoard = Array(9).fill("");
 // Game executor with history & grouping
 const game = Executor(
     (board, index, player) => {
+        // callNow invokes this with only `board` supplied (index/player are
+        // undefined) — guard against that so it cleanly returns the board
+        // unchanged instead of assigning to newBoard[undefined], which
+        // silently creates a stray non-numeric property on the array.
+        if (index == null) return board;
         const newBoard = [...board];
         if (!newBoard[index]) newBoard[index] = player;
         return newBoard;
@@ -17,6 +23,7 @@ const game = Executor(
         initialArgs: [initialBoard],
         historyStep: 1, // record every move
         groupBy: (board) => `move-${board.filter(Boolean).length}`, // label by move number
+        onError: (err) => console.error("game error:", err.message),
     }
 );
 
@@ -26,8 +33,11 @@ const score = Executor(
     {
         storeHistory: true,
         callNow: true,
-        initialArgs: [0],
+        initialArgs: [0, 0], // both s AND delta — a single-element
+        // initialArgs left delta undefined, so callNow computed
+        // 0 + undefined = NaN as the starting score.
         groupBy: (s) => (s >= 0 ? "positive" : "negative"),
+        onError: (err) => console.error("score error:", err.message),
     }
 );
 
@@ -35,15 +45,29 @@ const score = Executor(
 const group = Executor.combine(game, score);
 
 export default function App() {
+    // useExecutor(x) WITHOUT fullPower returns x.value directly — so `board`
+    // here IS the array itself, and `playerScore` IS the number itself.
+    // There's no `.value` to chain off either one; that was the original
+    // bug (board.value / playerScore.value were both undefined, and
+    // spreading an undefined board threw a TypeError on every click).
     const board = useExecutor(game);
     const playerScore = useExecutor(score);
     const [player, setPlayer] = useState("X");
     const [importText, setImportText] = useState("");
 
     const handleMove = (index) => {
-        game(board.value, index, player);
-        score(playerScore.value, 1);
+        if (board[index]) return; // ignore clicks on an already-filled cell
+        game(board, index, player);
+        score(playerScore, 1);
         setPlayer(player === "X" ? "O" : "X");
+    };
+
+    const handleImport = () => {
+        try {
+            game.importHistory(importText);
+        } catch (err) {
+            alert("Invalid history JSON — nothing was imported.");
+        }
     };
 
     return (
@@ -106,7 +130,7 @@ export default function App() {
                 <button onClick={() => setImportText(game.exportHistory())}>
                     Export Board
                 </button>
-                <button onClick={() => game.importHistory(importText)}>
+                <button onClick={handleImport}>
                     Import Board
                 </button>
             </div>

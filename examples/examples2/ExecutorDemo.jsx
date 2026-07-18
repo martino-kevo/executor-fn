@@ -1,5 +1,6 @@
 import React, { useState } from "react";
-import { Executor, useExecutor } from "executor-fn"; // your library
+import { Executor } from "executor-fn";
+import { useExecutor } from "executor-fn/react";
 
 const numberExec = Executor((x) => x, { storeHistory: true, callNow: false });
 
@@ -7,20 +8,20 @@ const numberExec = Executor((x) => x, { storeHistory: true, callNow: false });
 const otherExec1 = Executor((x) => x, { storeHistory: true });
 const otherExec2 = Executor((x) => x, { storeHistory: true });
 
+// ⚠️ Preload at module scope, run once — the original version called
+// otherExec1(10)/otherExec1(20)/etc. directly inside the component
+// function body, which React re-runs on every render. Since ANY of the
+// buttons below (sort, filter, merge) trigger a re-render, that meant
+// otherExec1/otherExec2's history grew a little more every single time —
+// unbounded growth from what looked like read-only UI actions.
+[10, 20, 30].forEach((v) => otherExec1(v));
+[100, 200].forEach((v) => otherExec2(v));
+
 export default function ExecutorDemo() {
   // Create an executor with numbers
   const state = useExecutor(numberExec);
-  
+
   const [filterResult, setFilterResult] = useState([]);
-
-  // preload data into others
-  otherExec1(10);
-  otherExec1(20);
-  otherExec1(30);
-
-  otherExec2(100);
-  otherExec2(200);
-
 
   const handleCopy = () => {
     numberExec.copy([otherExec1.history, otherExec2.history]);

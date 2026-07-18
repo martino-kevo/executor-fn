@@ -1,5 +1,6 @@
 import React from "react";
-import { Executor, useExecutor } from "executor-fn";
+import { Executor } from "executor-fn";
+import { useExecutor } from "executor-fn/react";
 
 // --- appStore.js ---
 // Executor stores { ui, data } together as one snapshot
@@ -56,9 +57,13 @@ function App() {
             )}
 
             {/* Undo/Redo Controls */}
+            {/* undo/redo take an optional `steps` argument — passing them
+                directly as onClick would hand React's SyntheticEvent to
+                `steps`, silently breaking the internal loop so the button
+                does nothing. Always wrap in an arrow function. */}
             <div style={{ marginTop: "1rem", display: "flex", gap: "0.5rem" }}>
-                <button onClick={appStore.undo}>⏪ Undo</button>
-                <button onClick={appStore.redo}>⏩ Redo</button>
+                <button onClick={() => appStore.undo()}>⏪ Undo</button>
+                <button onClick={() => appStore.redo()}>⏩ Redo</button>
             </div>
         </div>
     );

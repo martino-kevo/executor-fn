@@ -5,7 +5,9 @@ import { Executor } from "executor-fn"; // your library
 const counter = Executor((count, delta) => count + delta, {
   storeHistory: true,
   callNow: true,
-  initialArgs: [0],
+  initialArgs: [0, 0], // both count AND delta — a single-element
+  // initialArgs here left delta as undefined, so callNow computed
+  // 0 + undefined = NaN as the starting value.
 });
 
 export default function CounterApp() {
@@ -53,7 +55,10 @@ export default function CounterApp() {
           ⏪ Undo
         </button>
         <button
-          disabled={counter.history.length === 0 || !counter.redo}
+          // counter.redo is always a function reference (truthy), so
+          // `!counter.redo` never actually reflects whether there's
+          // anything TO redo — check the redoStack itself instead.
+          disabled={!counter.redoStack?.length}
           onClick={() => {
             counter.redo();
             updateUI();
@@ -72,7 +77,8 @@ export default function CounterApp() {
       </div>
 
       <div style={{ marginTop: "1rem" }}>
-        <strong>History:</strong> {JSON.stringify(counter.history)}
+        <strong>History:</strong>{" "}
+        {JSON.stringify(counter.history.map((entry) => entry.value))}
       </div>
     </div>
   );

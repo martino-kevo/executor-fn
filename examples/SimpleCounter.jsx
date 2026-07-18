@@ -1,5 +1,6 @@
 import React from "react";
-import { Executor, useExecutor } from "executor-fn"; // adjust import path
+import { Executor } from "executor-fn";
+import { useExecutor } from "executor-fn/react";
 
 // A simple counter executor
 const counter = Executor(
@@ -7,7 +8,9 @@ const counter = Executor(
     {
         storeHistory: true,
         callNow: true,
-        initialArgs: [0],
+        initialArgs: [0, 0], // both count AND delta — a single-element
+        // initialArgs here leaves delta as undefined, so callNow computes
+        // 0 + undefined = NaN as the starting value.
     }
 );
 
