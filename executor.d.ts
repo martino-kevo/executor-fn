@@ -449,6 +449,57 @@ export namespace Executor {
      * @returns void
      */
     export function restoreSnapshot(executors: ExecutorInstance<any>[], snapshot: any[]): void;
+
+    /**
+     * Options for Executor.computed
+     */
+    export type ComputedOptions<T> = {
+        /** @default false */
+        storeHistory?: boolean;
+        onError?: (error: unknown) => void;
+        equalityFn?: (a: T, b: T) => boolean;
+        metadataFn?: (value: T) => any;
+        maxHistory?: number;
+    };
+
+    /**
+     * A computed executor instance — a regular ExecutorInstance plus a
+     * stopComputing() method to detach it from its dependencies.
+     */
+    export type ComputedInstance<T> = ExecutorInstance<T> & {
+        /**
+         * Stop listening for dependency changes. Safe to call even if
+         * never needed — most module-scoped computed values never call
+         * this, since they're meant to live for the app's lifetime.
+         * @returns void
+         */
+        stopComputing(): void;
+    };
+
+    /**
+     * Create a computed/derived value that stays automatically in sync
+     * with its dependencies — the reactive equivalent of Redux selectors
+     * or MobX `computed`. The result is a real ExecutorInstance (with
+     * history, subscriptions, and useExecutor compatibility for free),
+     * so a computed value can itself be a dependency of another computed
+     * value.
+     *
+     *   const postCount = Executor.computed((postsVal) => postsVal.length, [posts]);
+     *
+     * For a parametrized lookup (e.g. "find the post with this specific
+     * id") rather than a single always-current value, use useExecutor's
+     * selector argument instead — see executor-fn/react.
+     *
+     * @param computeFn Receives each dependency's current .value, in order, and returns the derived value
+     * @param deps Non-empty array of dependency Executor instances
+     * @param options Same shape as ExecutorOptions, minus initialArgs/callNow/initialArgs/seedHistory/seedValue/groupBy/historyStep/noDuplicate/persistKey/persistStorage/syncTabs/onChange (not meaningful for a derived value)
+     * @returns A ComputedInstance<T> — call .stopComputing() to detach from its dependencies
+     */
+    export function computed<T>(
+        computeFn: (...depValues: any[]) => T,
+        deps: ExecutorInstance<any>[],
+        options?: ComputedOptions<T>
+    ): ComputedInstance<T>;
 }
 
 

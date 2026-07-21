@@ -1359,6 +1359,73 @@ Executor.restoreSnapshot = (executors, snapshot) => {
   });
 };
 
+// 🆕 A computed/derived value that stays automatically in sync with its
+// dependencies — the reactive equivalent of Redux selectors or MobX
+// `computed`. Deliberately built as a thin layer over the regular
+// Executor machinery rather than a separate system: the returned value
+// IS a real ExecutorInstance, so it gets history, subscriptions,
+// useExecutor compatibility, and composability (a computed can depend on
+// another computed) entirely for free.
+//
+//   const postCount = Executor.computed((postsVal) => postsVal.length, [posts]);
+//   postCount.value // always current, recomputes whenever `posts` changes
+//
+// Note: this is for a single value that should stay live across your
+// whole app. A parametrized lookup (e.g. "find the post with this one
+// specific id") isn't really the same shape as a computed value — that's
+// better solved with useExecutor's selector argument instead:
+//   useExecutor(posts, (postsVal) => postsVal.find((p) => p.id === id))
+Executor.computed = (computeFn, deps, options = {}) => {
+  if (!Array.isArray(deps) || deps.length === 0) {
+    throw new Error(
+      "Executor.computed requires a non-empty array of dependency executors as the second argument"
+    );
+  }
+  for (const dep of deps) {
+    if (!dep || typeof dep !== "function" || typeof dep._subscribe !== "function") {
+      throw new Error(
+        "Executor.computed: every dependency must be an Executor instance"
+      );
+    }
+  }
+
+  // The underlying executor's callback ignores whatever args it's called
+  // with and always reads the current .value straight off each
+  // dependency — that's what makes recomputation always reflect the
+  // latest state, regardless of what (if anything) triggered it.
+  const recompute = () => computeFn(...deps.map((dep) => dep.value));
+
+  const computedExec = Executor(recompute, {
+    storeHistory: options.storeHistory ?? false,
+    callNow: true, // compute an initial value immediately
+    onError: options.onError,
+    equalityFn: options.equalityFn,
+    metadataFn: options.metadataFn,
+    maxHistory: options.maxHistory,
+  });
+
+  // Subscribe to every dependency — including other computed values,
+  // since they're real Executors too — so any upstream change cascades
+  // through automatically.
+  const unsubscribers = deps.map((dep) => {
+    const handler = () => {
+      computedExec(); // re-invoke; recompute() ignores args and reads fresh values
+    };
+    dep._subscribe(handler);
+    return () => dep._unsubscribe(handler);
+  });
+
+  // 🆕 Stop listening to dependency changes — matches the stopSync()
+  // naming already used for cross-tab sync cleanup. Call this if a
+  // computed value is ever meant to be torn down before the app unloads
+  // (most module-scoped computed values never need to).
+  computedExec.stopComputing = () => {
+    unsubscribers.forEach((unsub) => unsub());
+  };
+
+  return computedExec;
+};
+
 // ✅ Export both default and named
 export { Executor };
 export default Executor;
@@ -1376,3 +1443,4 @@ export default Executor;
 // Later we can add a way to handle large data structures efficiently (revisit alongside deepClone if it becomes a real bottleneck)
 // Later: call-stack visualization is an app built on top of this data, not this library's job
 // ✅ Done: customize the initial state and behavior of the executor (seedHistory / seedValue options)
+// ✅ Done: computed/derived values that stay automatically in sync (Executor.computed)
