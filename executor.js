@@ -771,7 +771,14 @@ function Executor(callback, options = {}) {
             value: deepClone(val),
             meta: entry.meta,
             group: entry.group,
-            _index: entry._index,
+            // 🆕 Fresh _index relative to THIS executor's own counter, not
+            // the source's. Each executor's entryCounter is independent,
+            // so blindly carrying over entry._index (as this used to do)
+            // could collide with another copied entry's index — which
+            // silently corrupts sort("default")'s output. _time is still
+            // preserved from the source, since it reflects when that data
+            // point actually happened, not an internal ordering detail.
+            _index: ++entryCounter,
             _time: entry._time,
           });
         });
@@ -801,11 +808,38 @@ function Executor(callback, options = {}) {
   };
 
   // Merge one or more history entries into current history
-  fn.merge = (histories, { position = "end" } = {}) => {
+  fn.merge = (histories, { position = "end", overwrite = false, equalityFn: mergeEqualityFn } = {}) => {
     if (!storeHistory) return fn.value;
 
     // Normalize to array of histories
     const allHistories = Array.isArray(histories[0]) ? histories : [histories];
+
+    // 🆕 Fix: merge() now accepts its own equalityFn directly in opts —
+    // matching what the .d.ts's opts type has always declared, and what
+    // anyone would naturally try to pass. Previously this fell through to
+    // ONLY the executor's construction-time equalityFn (a setting meant
+    // for a different purpose — skipping consecutive duplicate pushes),
+    // with no documented link between the two and no way to override it
+    // per merge() call. That made `overwrite: true` effectively
+    // non-functional for the most common real case — matching entries by
+    // an id field while other fields differ — since without an
+    // id-aware equalityFn, matching silently fell back to comparing
+    // entire serialized objects, which two entries sharing an id but
+    // differing elsewhere would never satisfy.
+    const safeMergeEqualityFn = (a, b) => {
+      if (!mergeEqualityFn) return false;
+      try {
+        return mergeEqualityFn(a, b);
+      } catch (err) {
+        reportError(err);
+        return false;
+      }
+    };
+    const isMatch = mergeEqualityFn
+      ? safeMergeEqualityFn
+      : equalityFn
+      ? safeEqualityFn
+      : (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
     // Flatten and deep clone with duplicate checks
     const merged = [];
@@ -814,30 +848,37 @@ function Executor(callback, options = {}) {
         h.forEach((entry) => {
           const val = entry.value;
 
-          // noDuplicate + equalityFn
-          if (noDuplicate && equalityFn) {
-            if (history.some((e) => safeEqualityFn(e.value, val))) return;
-            if (merged.some((e) => safeEqualityFn(e.value, val))) return;
+          // 🆕 overwrite: replace a matching existing entry IN PLACE
+          // rather than skipping it (noDuplicate) or duplicating it
+          // (default). Takes priority over noDuplicate when both are set,
+          // since "overwrite the ones that already exist" implies
+          // matching regardless of the noDuplicate flag.
+          if (overwrite) {
+            const existingIndex = history.findIndex((e) => isMatch(e.value, val));
+            if (existingIndex !== -1) {
+              const old = history[existingIndex];
+              history[existingIndex] = {
+                value: deepClone(val),
+                meta: entry.meta,
+                group: entry.group,
+                _index: old._index, // keep original position so default-order sort is unaffected
+                _time: Date.now(), // this entry was just touched by the merge
+              };
+              return; // handled in place — not part of the position-inserted batch
+            }
           } else if (noDuplicate) {
-            if (
-              history.some(
-                (e) => JSON.stringify(e.value) === JSON.stringify(val)
-              )
-            )
-              return;
-            if (
-              merged.some(
-                (e) => JSON.stringify(e.value) === JSON.stringify(val)
-              )
-            )
-              return;
+            if (history.some((e) => isMatch(e.value, val))) return;
+            if (merged.some((e) => isMatch(e.value, val))) return;
           }
 
           merged.push({
             value: deepClone(val),
             meta: entry.meta,
             group: entry.group,
-            _index: entry._index,
+            // 🆕 Same fix as copy() above — fresh _index relative to this
+            // executor's own counter, not the source's, to avoid
+            // collisions that corrupt sort("default").
+            _index: ++entryCounter,
             _time: entry._time,
           });
         });

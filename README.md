@@ -78,7 +78,8 @@ import { Executor } from "executor-fn";
 
 // Create a reactive function
 const counter = Executor((n, delta) => n + delta, {
-  initialArgs: [0],
+  initialArgs: [0, 0], // both args — a single-element initialArgs here
+  // leaves `delta` undefined, so callNow computes 0 + undefined = NaN
   callNow: true,
   storeHistory: true,
 });
@@ -110,7 +111,7 @@ import { useExecutor } from "executor-fn/react";
 const store = Executor((n, d) => n + d, {
   callNow: true,
   storeHistory: true,
-  initialArgs: [0],
+  initialArgs: [0, 0], // both args — see the Quick Start note above
 });
 
 export default function Counter() {
@@ -121,8 +122,8 @@ export default function Counter() {
       <h2>Count: {count}</h2>
       <button onClick={() => store(store.value, 1)}>➕</button>
       <button onClick={() => store(store.value, -1)}>➖</button>
-      <button onClick={store.undo}>⏪ Undo</button>
-      <button onClick={store.redo}>⏩ Redo</button>
+      <button onClick={() => store.undo()}>⏪ Undo</button>
+      <button onClick={() => store.redo()}>⏩ Redo</button>
     </div>
   );
 }
@@ -130,6 +131,74 @@ export default function Counter() {
 
 🧠 No Redux. No Zustand. No boilerplate.
 Just one function with memory, history, and hooks.
+
+---
+
+## 🎯 Selective Subscriptions
+
+For deeply nested state, `useExecutor` can subscribe to just a slice of
+the value — so unrelated changes elsewhere in the store don't trigger a
+re-render:
+
+```jsx
+import { useExecutor, shallowEqual } from "executor-fn/react";
+
+// re-renders ONLY when user.name changes — not on any other field
+const name = useExecutor(userStore, (s) => s.user.name);
+
+// selecting an existing reference (like indexing into an array/object
+// already in the store) works with no extra setup — Object.is is enough,
+// since your state-update code naturally preserves references for
+// anything that didn't change:
+const firstTodo = useExecutor(todosStore, (s) => s.todos[0]);
+
+// but a selector that CONSTRUCTS a new object/array each call needs a
+// custom equality check, or it re-renders on every store change even
+// when the selected content is identical:
+const userInfo = useExecutor(userStore, (s) => ({ name: s.user.name, age: s.user.age }), shallowEqual);
+```
+
+`useExecutor` also still works exactly as before with no selector
+(`useExecutor(store)` for the full value, `useExecutor(store, true)` for
+the full executor instance).
+
+More examples: `examples/selective-subscriptions.jsx`
+
+---
+
+## 🧮 Computed / Derived Values
+
+`Executor.computed` creates a value that stays automatically in sync with
+its dependencies — the reactive equivalent of Redux selectors or MobX
+`computed`:
+
+```js
+import { Executor } from "executor-fn";
+
+const posts = Executor((p) => p, { callNow: true, initialArgs: [[]] });
+
+const postCount = Executor.computed((postsVal) => postsVal.length, [posts]);
+
+postCount.value; // always current — recomputes whenever `posts` changes
+```
+
+The result is a real Executor instance, so it composes (a computed value
+can depend on another computed value) and works with `useExecutor` like
+any other store:
+
+```jsx
+const count = useExecutor(postCount);
+```
+
+For a parametrized lookup (e.g. "find the post with this specific id")
+rather than a single always-current value, use `useExecutor`'s selector
+instead — see Selective Subscriptions above:
+
+```jsx
+const post = useExecutor(posts, (p) => p.find((post) => post.id === id));
+```
+
+More examples: `examples/computed-values.js`
 
 ---
 
@@ -144,7 +213,10 @@ import { Executor } from "executor-fn";
 const editor = Executor((_, newVal) => newVal, {
   storeHistory: true,
   callNow: true,
-  initialArgs: [""],
+  initialArgs: [undefined, ""], // both args — a single-element initialArgs
+  // here leaves newVal undefined, so editor.value starts as undefined
+  // instead of "" (and React would warn about an input switching from
+  // uncontrolled to controlled the first time you type).
 });
 
 export default function TextEditorApp() {
@@ -230,6 +302,16 @@ const ex = Executor(myFn, {
 - 🧩 Works Anywhere — Node, React, Vanilla JS, with zero required dependencies
 - 🎯 Composable — build stores, editors, or workflows; `split()`, `merge()`,
   `copy()` slice and recombine history
+
+> **Note on `merge({ overwrite: true })`:** pass `equalityFn` directly to
+> `merge()` to control what counts as a "match" — e.g.
+> `merge([other.history], { overwrite: true, equalityFn: (a, b) => a.id === b.id })`
+> to replace entries by id regardless of what else differs. Without an
+> `equalityFn` (here or set on the executor itself), `overwrite` falls back
+> to comparing entire serialized entries, which two entries sharing an id
+> but differing elsewhere will never satisfy — so `overwrite: true` alone
+> usually isn't what you want.
+
 - 💾 Serializable & Persistent — export/import history, auto-persist to
   IndexedDB (or any adapter), sync across tabs
 - 🔍 Queryable — `filterHistory`, `mapHistory`, `transformHistory`
@@ -261,9 +343,9 @@ I was just a curious developer who wanted to understand JavaScript callbacks —
 
 Then something clicked.
 I wrote a small class that called a function immediately when created.
-It was simple, but I shared it with ChatGPT first, then Claude — and together, we refined it step by step.
+It was simple, but I shared it with ChatGPT — and together, we refined it step by step.
 
-ChatGPT and Claude suggested improvements, helped me add state tracking, history, reset, undo, redo, and even showed me how to make it work in React.
+ChatGPT suggested improvements, helped me add state tracking, history, reset, undo, redo, and even showed me how to make it work in React.
 Suddenly I realized:
 
 This is basically Redux + Zustand + DevTools — but in one function.
@@ -279,9 +361,3 @@ What started as a moment of curiosity became a polished, production-ready tool t
 Executor is my way of saying:
 
 "State management doesn't have to be complicated — and sometimes the best tools are born from curiosity, prayer, and collaboration."
-
-Also by me: [**biscuit-cache-js**](https://www.npmjs.com/package/biscuit-cache-js) — a persistent, reactive browser cache with background refresh and cross-tab sync.
-
-## 📜 License
-
-MIT © Martins Kelvin

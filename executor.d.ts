@@ -317,20 +317,35 @@ export type ExecutorInstance<T> = ((...args: any[]) => Promise<T>) & {
 
     // 🆕 Advanced history ops
     /**
-     * Copy history entries from other Executor instances and overwrite current history
+     * Copy history entries from other Executor instances and overwrite current history.
+     * Duplicate detection (if noDuplicate is set) always uses the executor's
+     * own construction-time equalityFn — copy() doesn't take a per-call
+     * override the way merge() does (see merge() below).
      * @param histories Other histories to copy from and overwrite current history
      * @returns The current value (unchanged)
      */
     copy(histories: HistoryEntry<T>[][]): T; // overwrite with other histories
     /**
-     * Merge history entries from other Executor instances into current history
+     * Merge history entries from other Executor instances into current history.
      * @param histories Other histories to merge into current history
-     * @param opts Position to insert ("start", "end", or specific index) and whether to overwrite existing entries
+     * @param opts Position to insert ("start", "end", or specific index);
+     * whether to overwrite existing matching entries in place rather than
+     * append/skip them; and the equality function used to decide what
+     * counts as "matching" for both overwrite and noDuplicate. If opts.equalityFn
+     * is omitted, falls back to the executor's own construction-time
+     * equalityFn, then to a full JSON.stringify comparison if neither is
+     * set. Passing opts.equalityFn directly is almost always what you want
+     * for overwrite — e.g. `{ overwrite: true, equalityFn: (a, b) => a.id === b.id }`
+     * to match entries by id regardless of what else differs between them.
      * @returns The current value (unchanged)
      */
     merge(
         histories: HistoryEntry<T>[][],
-        opts?: { position?: "start" | "end" | number; overwrite?: boolean }
+        opts?: {
+            position?: "start" | "end" | number;
+            overwrite?: boolean;
+            equalityFn?: (a: T, b: T) => boolean;
+        }
     ): T;
     /**
      * Sort history entries by various criteria
