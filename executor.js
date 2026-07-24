@@ -742,11 +742,33 @@ function Executor(callback, options = {}) {
   };
 
   // Copy one or more history entries and replace current history
-  fn.copy = (histories) => {
+  fn.copy = (histories, { equalityFn: copyEqualityFn } = {}) => {
     if (!storeHistory) return fn.value;
 
     // Normalize to array of histories
     const allHistories = Array.isArray(histories[0]) ? histories : [histories];
+
+    // 🆕 Same fix as merge(): accept an equalityFn directly per-call,
+    // rather than dedup only ever being able to use whatever equalityFn
+    // happened to be set at construction time (a setting meant for a
+    // different purpose — skipping consecutive duplicate pushes). Without
+    // this, noDuplicate + no construction-time equalityFn falls back to
+    // comparing entire serialized entries, which two entries sharing an
+    // id but differing elsewhere would never satisfy.
+    const safeCopyEqualityFn = (a, b) => {
+      if (!copyEqualityFn) return false;
+      try {
+        return copyEqualityFn(a, b);
+      } catch (err) {
+        reportError(err);
+        return false;
+      }
+    };
+    const isDuplicate = copyEqualityFn
+      ? (a, b) => safeCopyEqualityFn(a, b)
+      : equalityFn
+      ? (a, b) => safeEqualityFn(a, b)
+      : (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
     // Flatten + deep clone with duplicate checks
     const copied = [];
@@ -755,16 +777,8 @@ function Executor(callback, options = {}) {
         h.forEach((entry) => {
           const val = entry.value;
 
-          // noDuplicate + equalityFn
-          if (noDuplicate && equalityFn) {
-            if (copied.some((e) => safeEqualityFn(e.value, val))) return;
-          } else if (noDuplicate) {
-            if (
-              copied.some(
-                (e) => JSON.stringify(e.value) === JSON.stringify(val)
-              )
-            )
-              return;
+          if (noDuplicate && copied.some((e) => isDuplicate(e.value, val))) {
+            return;
           }
 
           copied.push({

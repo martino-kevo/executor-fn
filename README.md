@@ -303,12 +303,13 @@ const ex = Executor(myFn, {
 - 🎯 Composable — build stores, editors, or workflows; `split()`, `merge()`,
   `copy()` slice and recombine history
 
-> **Note on `merge({ overwrite: true })`:** pass `equalityFn` directly to
-> `merge()` to control what counts as a "match" — e.g.
+> **Note on `merge()`/`copy()` and `equalityFn`:** both accept an
+> `equalityFn` directly to control what counts as a "match" for
+> `merge({ overwrite: true })` and `copy()`'s `noDuplicate` dedup — e.g.
 > `merge([other.history], { overwrite: true, equalityFn: (a, b) => a.id === b.id })`
 > to replace entries by id regardless of what else differs. Without an
-> `equalityFn` (here or set on the executor itself), `overwrite` falls back
-> to comparing entire serialized entries, which two entries sharing an id
+> `equalityFn` (here or set on the executor itself), both fall back to
+> comparing entire serialized entries, which two entries sharing an id
 > but differing elsewhere will never satisfy — so `overwrite: true` alone
 > usually isn't what you want.
 
@@ -361,3 +362,5 @@ What started as a moment of curiosity became a polished, production-ready tool t
 Executor is my way of saying:
 
 "State management doesn't have to be complicated — and sometimes the best tools are born from curiosity, prayer, and collaboration."
+
+Also by me

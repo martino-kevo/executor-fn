@@ -318,13 +318,17 @@ export type ExecutorInstance<T> = ((...args: any[]) => Promise<T>) & {
     // 🆕 Advanced history ops
     /**
      * Copy history entries from other Executor instances and overwrite current history.
-     * Duplicate detection (if noDuplicate is set) always uses the executor's
-     * own construction-time equalityFn — copy() doesn't take a per-call
-     * override the way merge() does (see merge() below).
      * @param histories Other histories to copy from and overwrite current history
+     * @param opts Equality function used for duplicate detection when
+     * noDuplicate is set. If omitted, falls back to the executor's own
+     * construction-time equalityFn, then to a full JSON.stringify
+     * comparison if neither is set — matching merge()'s fallback chain.
      * @returns The current value (unchanged)
      */
-    copy(histories: HistoryEntry<T>[][]): T; // overwrite with other histories
+    copy(
+        histories: HistoryEntry<T>[][],
+        opts?: { equalityFn?: (a: T, b: T) => boolean }
+    ): T; // overwrite with other histories
     /**
      * Merge history entries from other Executor instances into current history.
      * @param histories Other histories to merge into current history
